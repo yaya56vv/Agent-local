@@ -1,6 +1,6 @@
-# Assistant Windows - Missions 6 & 7
+# Assistant Windows - Missions 6, 7 & 8
 
-Mini-application Windows PySide6 avec hotkeys F1/F8/F9/F10 + capture d'écran + contrôle souris + mode exploration
+Mini-application Windows PySide6 avec hotkeys F1/F2/F8/F9/F10 + capture d'écran + contrôle souris + mode exploration + voix
 
 ## 🎯 Objectifs
 
@@ -19,6 +19,12 @@ Application Windows locale en Python utilisant PySide6, indépendante du backend
 - Mode exploration automatique
 - Détection interruption utilisateur
 - STOP kill switch (fermeture totale)
+
+### Mission 8 ✅
+- Entrée vocale (push-to-talk F2)
+- Synthèse vocale (TTS)
+- Mode mini-bulle flottante
+- Intégration voix + orchestrateur
 
 ## 🔑 Hotkeys Globales
 
@@ -91,11 +97,13 @@ python main.py
    - 🟢 Vision Active (capture automatique)
    - 🟡 Vision Arrêtée (mode manuel)
    - 🔵 Exploration Active (Mission 7)
+   - 🎙 En écoute... (Mission 8)
    - 🔴 Hors Ligne (backend indisponible)
-3. **Zone de texte** pour afficher les résultats Vision et logs d'exploration
+3. **Zone de texte** pour afficher les résultats Vision, logs d'exploration et transcriptions vocales
 4. **Champ de saisie** (optionnel)
-5. **Bouton Exploration** 🚀 Lancer/Arrêter exploration (Mission 7)
-6. **Bouton STOP** 🛑 Fermeture totale (kill switch)
+5. **Bouton Mini-bulle** ⬇ Réduire en bulle (Mission 8)
+6. **Bouton Exploration** 🚀 Lancer/Arrêter exploration (Mission 7)
+7. **Bouton STOP** 🛑 Fermeture totale (kill switch)
 
 ## 🔄 Comportement des Hotkeys
 

@@ -1,6 +1,7 @@
 """
 Hotkeys Service - Global hotkey management
 F1 = Show window (no capture)
+F2 = Toggle voice listening (push-to-talk)
 F8 = Show window + start auto capture
 F9 = Stop auto capture
 F10 = Single screenshot
@@ -20,12 +21,14 @@ class HotkeyManager(QObject):
     # Signals
     capture_started = Signal()
     capture_stopped = Signal()
+    voice_toggle_requested = Signal()  # F2 pressed
     
     def __init__(self, window):
         super().__init__()
         self.window = window
         self.screenshot_service = ScreenshotService()
         self.api_client = APIClient()
+        self.voice_service = None  # Will be set by main.py
         
         # Auto-capture state
         self.auto_capture_active = False
@@ -38,12 +41,20 @@ class HotkeyManager(QObject):
         
         logger.info("HotkeyManager initialized")
         
+    def set_voice_service(self, voice_service):
+        """Set the voice service reference"""
+        self.voice_service = voice_service
+        
     def register_all_hotkeys(self):
         """Register all global hotkeys"""
         try:
             # F1 - Show window (no capture)
             keyboard.add_hotkey('f1', self._on_f1_pressed, suppress=True)
             logger.info("Registered F1 hotkey")
+            
+            # F2 - Toggle voice listening (push-to-talk)
+            keyboard.add_hotkey('f2', self._on_f2_pressed, suppress=True)
+            logger.info("Registered F2 hotkey")
             
             # F8 - Show window + start auto capture
             keyboard.add_hotkey('f8', self._on_f8_pressed, suppress=True)
@@ -85,6 +96,22 @@ class HotkeyManager(QObject):
                 self.window.raise_()
         except Exception as e:
             logger.error(f"Error handling F1: {e}", exc_info=True)
+    
+    def _on_f2_pressed(self):
+        """F2 - Toggle voice listening (push-to-talk)"""
+        logger.info("F2 pressed - toggling voice")
+        try:
+            # Show window if hidden
+            if not self.window.isVisible():
+                self.window.show()
+                self.window.activateWindow()
+                self.window.raise_()
+            
+            # Emit signal for voice toggle
+            self.voice_toggle_requested.emit()
+            
+        except Exception as e:
+            logger.error(f"Error handling F2: {e}", exc_info=True)
             
     def _on_f8_pressed(self):
         """F8 - Show window + start auto capture"""

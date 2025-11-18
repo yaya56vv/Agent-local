@@ -19,18 +19,31 @@ class FloatingWindow(QWidget):
     # Signals
     stop_requested = Signal()
     exploration_requested = Signal(str)  # goal
+    voice_response_ready = Signal(str)  # response text to speak
     
     # State constants
     STATE_READY = "🟠 Prêt"
     STATE_VISION_ACTIVE = "🟢 Vision Active"
     STATE_VISION_STOPPED = "🟡 Vision Arrêtée"
     STATE_EXPLORATION = "🔵 Exploration Active"
+    STATE_VOICE_LISTENING = "🎙 En écoute..."
     STATE_OFFLINE = "🔴 Hors Ligne"
     
     def __init__(self):
         super().__init__()
         self.current_state = self.STATE_READY
         self.mouse_controller = None
+        self.voice_service = None
+        self.api_client = None
+        
+        # Mini-bubble mode
+        self.is_mini_mode = False
+        self.full_size = (320, 500)
+        self.mini_size = (80, 80)
+        
+        # Store widgets for show/hide
+        self.full_mode_widgets = []
+        
         self.init_ui()
         
     def init_ui(self):
@@ -129,6 +142,26 @@ class FloatingWindow(QWidget):
             }
         """)
         layout.addWidget(self.input_field)
+        self.full_mode_widgets.append(self.input_field)
+        
+        # Mini-bubble toggle button
+        self.mini_button = QPushButton("⬇ Réduire en bulle")
+        self.mini_button.setFont(QFont("Segoe UI", 8))
+        self.mini_button.setStyleSheet("""
+            QPushButton {
+                background-color: #424242;
+                color: white;
+                border: none;
+                border-radius: 5px;
+                padding: 5px;
+            }
+            QPushButton:hover {
+                background-color: #616161;
+            }
+        """)
+        self.mini_button.clicked.connect(self.toggle_mini_mode)
+        layout.addWidget(self.mini_button)
+        self.full_mode_widgets.append(self.mini_button)
         
         # Exploration button
         self.exploration_button = QPushButton("🚀 Lancer Exploration")
@@ -151,6 +184,7 @@ class FloatingWindow(QWidget):
         """)
         self.exploration_button.clicked.connect(self.on_exploration_clicked)
         layout.addWidget(self.exploration_button)
+        self.full_mode_widgets.append(self.exploration_button)
         
         # Stop button
         self.stop_button = QPushButton("⏹ STOP (Fermer)")
@@ -169,6 +203,10 @@ class FloatingWindow(QWidget):
         """)
         self.stop_button.clicked.connect(self.on_stop_clicked)
         layout.addWidget(self.stop_button)
+        self.full_mode_widgets.append(self.stop_button)
+        
+        # Add output and state to full mode widgets
+        self.full_mode_widgets.extend([self.output_text, self.state_label])
         
         self.setLayout(layout)
         
@@ -239,6 +277,23 @@ class FloatingWindow(QWidget):
                 self.append_output(f"  • {action}")
             self.append_output("")
     
+    def set_voice_service(self, voice_service):
+        """Set the voice service reference"""
+        self.voice_service = voice_service
+        
+        # Connect signals
+        if voice_service:
+            voice_service.listening_started.connect(self.on_voice_listening_started)
+            voice_service.listening_stopped.connect(self.on_voice_listening_stopped)
+            voice_service.transcription_ready.connect(self.on_voice_transcription)
+            voice_service.speaking_started.connect(self.on_voice_speaking_started)
+            voice_service.speaking_stopped.connect(self.on_voice_speaking_stopped)
+            voice_service.error_occurred.connect(self.on_voice_error)
+    
+    def set_api_client(self, api_client):
+        """Set the API client reference"""
+        self.api_client = api_client
+    
     def set_mouse_controller(self, controller):
         """Set the mouse controller reference"""
         self.mouse_controller = controller
@@ -308,6 +363,129 @@ class FloatingWindow(QWidget):
                 background-color: #2196F3;
             }
         """)
+    
+    @Slot()
+    def on_voice_listening_started(self):
+        """Handle voice listening started"""
+        self.set_state(self.STATE_VOICE_LISTENING)
+        self.append_output("\n🎙 Écoute vocale activée... Parlez maintenant.")
+        
+    @Slot()
+    def on_voice_listening_stopped(self):
+        """Handle voice listening stopped"""
+        if self.current_state == self.STATE_VOICE_LISTENING:
+            self.set_state(self.STATE_READY)
+            
+    @Slot(str)
+    def on_voice_transcription(self, text: str):
+        """Handle voice transcription ready"""
+        self.append_output(f"\n💬 Tu as dit : \"{text}\"")
+        self.append_output("📤 Envoi au backend...")
+        
+        # Send to orchestrator
+        if self.api_client:
+            response = self.api_client.send_voice_prompt(text)
+            if response:
+                # Extract response text
+                response_text = self._extract_response_text(response)
+                self.append_output(f"\n🤖 Réponse : {response_text}")
+                
+                # Emit signal to speak response
+                self.voice_response_ready.emit(response_text)
+            else:
+                self.append_output("❌ Erreur de communication avec le backend")
+        else:
+            self.append_output("❌ API client non disponible")
+            
+    def _extract_response_text(self, response: dict) -> str:
+        """Extract readable text from orchestrator response"""
+        # Try different response formats
+        if isinstance(response, str):
+            return response
+        if "response" in response:
+            return str(response["response"])
+        if "result" in response:
+            return str(response["result"])
+        if "message" in response:
+            return str(response["message"])
+        # Fallback
+        return str(response)
+        
+    @Slot(str)
+    def on_voice_speaking_started(self, text: str):
+        """Handle TTS started"""
+        self.append_output(f"🔊 Lecture vocale en cours...")
+        
+    @Slot()
+    def on_voice_speaking_stopped(self):
+        """Handle TTS stopped"""
+        pass
+        
+    @Slot(str)
+    def on_voice_error(self, error: str):
+        """Handle voice error"""
+        self.append_output(f"❌ Erreur vocale : {error}")
+    
+    def toggle_mini_mode(self):
+        """Toggle between full and mini-bubble mode"""
+        if self.is_mini_mode:
+            self._switch_to_full_mode()
+        else:
+            self._switch_to_mini_mode()
+            
+    def _switch_to_mini_mode(self):
+        """Switch to mini-bubble mode"""
+        self.is_mini_mode = True
+        
+        # Hide all full mode widgets
+        for widget in self.full_mode_widgets:
+            widget.hide()
+            
+        # Resize to mini
+        self.setFixedSize(*self.mini_size)
+        
+        # Update styling for bubble
+        self.setStyleSheet("""
+            QWidget {
+                background-color: """ + self._get_bubble_color() + """;
+                border-radius: 40px;
+            }
+        """)
+        
+        logger.info("Switched to mini-bubble mode")
+        
+    def _switch_to_full_mode(self):
+        """Switch to full window mode"""
+        self.is_mini_mode = False
+        
+        # Show all full mode widgets
+        for widget in self.full_mode_widgets:
+            widget.show()
+            
+        # Resize to full
+        self.setMinimumSize(0, 0)
+        self.setMaximumSize(16777215, 16777215)
+        self.resize(*self.full_size)
+        
+        # Restore normal styling
+        self.apply_dark_theme()
+        
+        logger.info("Switched to full window mode")
+        
+    def _get_bubble_color(self) -> str:
+        """Get bubble color based on current state"""
+        if self.current_state == self.STATE_READY:
+            return "#FF9800"  # Orange
+        elif self.current_state == self.STATE_VISION_ACTIVE:
+            return "#4CAF50"  # Green
+        elif self.current_state == self.STATE_EXPLORATION:
+            return "#2196F3"  # Blue
+        elif self.current_state == self.STATE_VOICE_LISTENING:
+            return "#9C27B0"  # Purple
+        elif self.current_state == self.STATE_OFFLINE:
+            return "#F44336"  # Red
+        else:
+            return "#FFC107"  # Amber
             
     def on_stop_clicked(self):
         """Handle stop button click - KILL SWITCH"""
@@ -316,9 +494,14 @@ class FloatingWindow(QWidget):
         self.stop_requested.emit()
         
     def mousePressEvent(self, event):
-        """Handle mouse press for window dragging"""
+        """Handle mouse press for window dragging or bubble click"""
         if event.button() == Qt.MouseButton.LeftButton:
-            self.drag_position = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+            if self.is_mini_mode:
+                # Click on bubble = switch to full mode
+                self._switch_to_full_mode()
+            else:
+                # Normal dragging
+                self.drag_position = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
             event.accept()
             
     def mouseMoveEvent(self, event):

@@ -1,6 +1,6 @@
 """
 Assistant Windows - Main Entry Point
-Floating copilot window with F1/F8/F9/F10 hotkeys
+Floating copilot window with F1/F2/F8/F9/F10 hotkeys + voice
 """
 import sys
 import logging
@@ -11,6 +11,7 @@ from services.hotkeys import HotkeyManager
 from services.mouse_controller import MouseController
 from services.screenshot import ScreenshotService
 from services.api_client import APIClient
+from services.voice import VoiceService
 
 # Configure logging
 logging.basicConfig(
@@ -33,6 +34,7 @@ class AssistantApp:
         self.mouse_controller = None
         self.screenshot_service = None
         self.api_client = None
+        self.voice_service = None
         
     def initialize(self):
         """Initialize the application components"""
@@ -41,9 +43,14 @@ class AssistantApp:
         # Create services
         self.screenshot_service = ScreenshotService()
         self.api_client = APIClient()
+        self.voice_service = VoiceService()
         
         # Create floating window
         self.window = FloatingWindow()
+        
+        # Link services to window
+        self.window.set_api_client(self.api_client)
+        self.window.set_voice_service(self.voice_service)
         
         # Create mouse controller
         self.mouse_controller = MouseController(
@@ -56,10 +63,13 @@ class AssistantApp:
         
         # Create hotkey manager
         self.hotkey_manager = HotkeyManager(self.window)
+        self.hotkey_manager.set_voice_service(self.voice_service)
         
         # Connect signals
         self.window.stop_requested.connect(self.shutdown)
         self.window.exploration_requested.connect(self.start_exploration)
+        self.window.voice_response_ready.connect(self.speak_response)
+        self.hotkey_manager.voice_toggle_requested.connect(self.toggle_voice)
         
         # Register hotkeys
         self.hotkey_manager.register_all_hotkeys()
@@ -71,6 +81,26 @@ class AssistantApp:
         logger.info(f"Starting exploration with goal: {goal}")
         if self.mouse_controller:
             self.mouse_controller.start_exploration(goal)
+    
+    def toggle_voice(self):
+        """Toggle voice listening (F2 hotkey)"""
+        logger.info("Voice toggle requested")
+        if not self.voice_service:
+            logger.error("Voice service not initialized")
+            return
+            
+        if self.voice_service.is_listening():
+            # Stop listening
+            self.voice_service.stop_listening()
+        else:
+            # Start listening
+            self.voice_service.start_listening()
+    
+    def speak_response(self, text: str):
+        """Speak response text via TTS"""
+        logger.info(f"Speaking response: {text[:50]}...")
+        if self.voice_service:
+            self.voice_service.speak(text)
         
     def run(self):
         """Run the application"""
@@ -85,6 +115,12 @@ class AssistantApp:
     def shutdown(self):
         """Shutdown the application - KILL SWITCH"""
         logger.info("🛑 SHUTTING DOWN Assistant Windows (KILL SWITCH)...")
+        
+        # Stop voice if active
+        if self.voice_service:
+            self.voice_service.stop_listening()
+            self.voice_service.stop_speaking()
+            self.voice_service.cleanup()
         
         # Stop exploration if active
         if self.mouse_controller:

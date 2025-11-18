@@ -127,6 +127,46 @@ class APIClient:
             logger.error(f"Error getting next GUI action: {e}", exc_info=True)
             return None
     
+    def send_voice_prompt(self, prompt: str, session_id: str = "voice_session") -> Optional[Dict]:
+        """
+        Send voice prompt to orchestrator
+        
+        Args:
+            prompt: Transcribed text from voice
+            session_id: Session identifier
+            
+        Returns:
+            dict: Orchestrator response, or None if failed
+        """
+        try:
+            endpoint = f"{self.base_url}/orchestrate"
+            
+            data = {
+                'prompt': prompt,
+                'execution_mode': 'auto',
+                'session_id': session_id
+            }
+            
+            logger.debug(f"Sending voice prompt: {prompt}")
+            
+            response = self.session.post(
+                endpoint,
+                json=data,
+                timeout=self.timeout
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                logger.info("Voice prompt processed successfully")
+                return result
+            else:
+                logger.error(f"Backend returned status {response.status_code}")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error sending voice prompt: {e}", exc_info=True)
+            return None
+    
     def check_health(self) -> bool:
         """
         Check if backend is available
