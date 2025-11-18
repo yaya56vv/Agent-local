@@ -70,9 +70,9 @@ class RAGStore:
             CREATE TABLE IF NOT EXISTS chunks (
                 id TEXT PRIMARY KEY,
                 document_id TEXT NOT NULL,
-                chunk_index INTEGER NOT NULL,
-                content TEXT NOT NULL,
+                chunk TEXT NOT NULL,
                 embedding TEXT,
+                order_index INTEGER NOT NULL,
                 created_at TEXT NOT NULL,
                 FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE
             )
@@ -182,7 +182,7 @@ class RAGStore:
         
         return float(dot_product / (norm1 * norm2))
     
-    def add_document(
+    async def add_document(
         self,
         dataset: str,
         filename: str,
@@ -221,32 +221,26 @@ class RAGStore:
         # Chunk the content
         chunks = self._chunk_text(content)
         
-        # Store chunks with embeddings (sync wrapper for async)
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        
-        try:
-            for idx, chunk in enumerate(chunks):
-                chunk_id = f"{doc_id}_{idx}"
-                
-                # Get embedding
-                embedding = loop.run_until_complete(self._get_embedding(chunk))
-                embedding_json = json.dumps(embedding)
-                
-                cursor.execute("""
-                    INSERT OR REPLACE INTO chunks
-                    (id, document_id, chunk_index, content, embedding, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                """, (chunk_id, doc_id, idx, chunk, embedding_json, now))
-        finally:
-            loop.close()
+        # Store chunks with embeddings
+        for idx, chunk in enumerate(chunks):
+            chunk_id = f"{doc_id}_{idx}"
+            
+            # Get embedding
+            embedding = await self._get_embedding(chunk)
+            embedding_json = json.dumps(embedding)
+            
+            cursor.execute("""
+                INSERT OR REPLACE INTO chunks
+                (id, document_id, chunk, embedding, order_index, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (chunk_id, doc_id, chunk, embedding_json, idx, now))
         
         conn.commit()
         conn.close()
         
         return doc_id
     
-    def query(
+    async def query(
         self,
         dataset: str,
         question: str,
@@ -264,20 +258,14 @@ class RAGStore:
             List of relevant chunks with metadata
         """
         # Get question embedding
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        
-        try:
-            question_embedding = loop.run_until_complete(self._get_embedding(question))
-        finally:
-            loop.close()
+        question_embedding = await self._get_embedding(question)
         
         # Get all chunks from dataset
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
         cursor.execute("""
-            SELECT c.id, c.content, c.embedding, d.filename, d.metadata
+            SELECT c.id, c.chunk, c.embedding, d.filename, d.metadata
             FROM chunks c
             JOIN documents d ON c.document_id = d.id
             WHERE d.dataset = ?
@@ -392,3 +380,87 @@ class RAGStore:
             "chunk_count": chunk_count,
             "documents": documents
         }
+    
+    def get_document_chunks(self, doc_id: str) -> List[Dict[str, Any]]:
+        """
+        Get all chunks for a specific document.
+        
+        Args:
+            doc_id: Document ID
+            
+        Returns:
+            List of chunks with content
+        """
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            SELECT id, chunk, order_index
+            FROM chunks
+            WHERE document_id = ?
+            ORDER BY order_index
+        """, (doc_id,))
+        
+        chunks = [
+            {
+                "id": row[0],
+                "content": row[1],
+                "order_index": row[2]
+            }
+            for row in cursor.fetchall()
+        ]
+        
+        conn.close()
+        return chunks
+    
+    def list_all_documents(self) -> List[Dict[str, Any]]:
+        """
+        List all documents across all datasets.
+        
+        Returns:
+            List of all documents with metadata
+        """
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            SELECT id, dataset, filename, content, metadata, created_at
+            FROM documents
+            ORDER BY created_at DESC
+        """)
+        
+        documents = []
+        for row in cursor.fetchall():
+            doc_id, dataset, filename, content, metadata_json, created_at = row
+            documents.append({
+                "id": doc_id,
+                "content": content,
+                "metadata": {
+                    "dataset": dataset,
+                    "filename": filename,
+                    **(json.loads(metadata_json) if metadata_json else {})
+                },
+                "created_at": created_at
+            })
+        
+        conn.close()
+        return documents
+    
+    def delete_document(self, doc_id: str) -> None:
+        """
+        Delete a specific document and its chunks.
+        
+        Args:
+            doc_id: Document ID to delete
+        """
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        # Delete chunks first (foreign key constraint)
+        cursor.execute("DELETE FROM chunks WHERE document_id = ?", (doc_id,))
+        
+        # Delete document
+        cursor.execute("DELETE FROM documents WHERE id = ?", (doc_id,))
+        
+        conn.commit()
+        conn.close()
