@@ -33,6 +33,9 @@ class Settings(BaseSettings):
     # --- LOCAL LLM ---
     LOCAL_LLM_PROVIDER: str = "ollama"  # ollama or lm_studio
 
+    # --- ORCHESTRATOR ---
+    ORCHESTRATOR_DEBUG: bool = True
+
     # --- GLOBAL CONFIG ---
     AGENT_NAME: str = "Agent Local"
     VERSION: str = "0.2.0"

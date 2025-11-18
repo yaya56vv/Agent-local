@@ -7,7 +7,9 @@ from backend.connectors.code.code_executor import CodeExecutor
 from backend.connectors.memory.memory_manager import MemoryManager
 from backend.connectors.files.file_manager import FileManager
 from backend.connectors.system.system_actions import SystemActions
+from backend.connectors.vision.vision_analyzer import VisionAnalyzer
 from backend.rag.rag_store import RAGStore
+from backend.config.settings import settings
 
 
 class Orchestrator:
@@ -29,6 +31,7 @@ class Orchestrator:
         self.memory_manager = MemoryManager()
         self.file_manager = FileManager()
         self.system_actions = SystemActions()
+        self.vision_analyzer = VisionAnalyzer()
         self.rag = RAGStore()
         
         # Intent patterns for quick detection
@@ -38,18 +41,21 @@ class Orchestrator:
                 r"what is|who is|where is|when is|how to",
                 r"latest|news|information about"
             ],
-            "vision": [
-                r"screenshot|capture|image|visual|voir|regarde",
-                r"what do you see|analyze.*screen|check.*display"
+            "vision_analysis": [
+                r"analyse.*image|analyze.*image|regarde.*image",
+                r"qu'est-ce.*capture|what.*screenshot|explique.*capture",
+                r"que vois-tu|what do you see|check.*display",
+                r"explique.*qui.*va.*pas.*écran|explain.*bug.*screen",
+                r"screenshot|capture d'écran|screen capture"
             ],
             "code_execution": [
                 r"write.*code|create.*function|implement|debug",
                 r"fix.*bug|refactor|optimize.*code",
                 r"generate.*script|build.*application",
-                r"corrige.*code|répare.*code|fix.*code",
-                r"exécute.*script|run.*code|execute.*code",
+                r"corrige.*code|repare.*code|fix.*code",
+                r"execute.*script|run.*code|execute.*code",
                 r"analyse.*code|analyze.*code|review.*code",
-                r"optimise|optimize|améliore.*code|improve.*code"
+                r"optimise|optimize|ameliore.*code|improve.*code"
             ],
             "memory": [
                 r"remember|recall|what did|previous|history",
@@ -96,11 +102,200 @@ class Orchestrator:
             "file_write": self._action_file_write,
             "file_list": self._action_file_list,
             "file_delete": self._action_file_delete,
+            "vision_analyze": self._action_vision_analyze,
             "rag_query": self._action_rag_query,
             "rag_add": self._action_rag_add,
             "memory_recall": self._action_memory_recall,
             "memory_search": self._action_memory_search
         }
+        
+        # Sensitive actions that require confirmation
+        self.SENSITIVE_ACTIONS = {
+            "system_open", "system_run", "system_kill",
+            "file_write", "file_delete",
+            "code_execute", "rag_add"
+        }
+        
+        # Safe actions that can be executed directly
+        self.SAFE_ACTIONS = {
+            "search_web", "conversation",
+            "rag_query", "code_analyze", "code_explain",
+            "memory_recall", "memory_search", "file_read", "file_list"
+        }
+
+    def _log(self, message: str):
+        """Log message if debug mode is enabled."""
+        if settings.ORCHESTRATOR_DEBUG:
+            print(message)
+
+    def _is_plan_sensitive(self, steps: List[Dict[str, Any]]) -> bool:
+        """
+        Determine if a plan contains sensitive actions or is long.
+        
+        Args:
+            steps: List of action steps
+            
+        Returns:
+            bool: True if plan requires confirmation
+        """
+        # Multiple steps = long plan = requires confirmation
+        if len(steps) > 1:
+            return True
+        
+        # Check for sensitive actions
+        for step in steps:
+            action = step.get("action", "")
+            if action in self.SENSITIVE_ACTIONS:
+                return True
+        
+        return False
+
+    async def run(
+        self,
+        prompt: str,
+        context: Optional[str] = None,
+        session_id: str = "default",
+        execution_mode: str = "auto"
+    ) -> Dict[str, Any]:
+        """
+        Main orchestration method with execution modes and permission system.
+        
+        Args:
+            prompt: User's input text
+            context: Optional additional context
+            session_id: Session ID for memory management
+            execution_mode: Execution mode (auto, plan_only, step_by_step)
+            
+        Returns:
+            dict: Structured response with execution results and permissions
+        """
+        self._log(f"[ORCH] Nouveau prompt recu : {prompt}")
+        self._log(f"[ORCH] Mode d'execution : {execution_mode}")
+        
+        # Step 1: Analyze and create plan
+        plan = await self.think(prompt, context)
+        
+        intention = plan.get("intention", "fallback")
+        confidence = plan.get("confidence", 0.0)
+        steps = plan.get("steps", [])
+        response = plan.get("response", "")
+        
+        self._log(f"[ORCH] Intention detectee : {intention} (confiance={confidence:.2f})")
+        self._log(f"[ORCH] Plan genere : {len(steps)} etape(s)")
+        
+        # Step 2: Determine if plan requires confirmation
+        requires_confirmation = self._is_plan_sensitive(steps)
+        
+        if requires_confirmation:
+            self._log("[ORCH] Plan sensible ou long - validation requise")
+        else:
+            self._log("[ORCH] Plan court et sur - execution possible")
+        
+        # Step 3: Execute based on mode
+        execution_results = []
+        
+        if execution_mode == "plan_only":
+            # Mode 1: plan_only - Never execute, just return plan
+            self._log("[ORCH] Mode plan_only - aucune execution")
+            requires_confirmation = True
+            
+        elif execution_mode == "step_by_step":
+            # Mode 2: step_by_step - Execute only first step
+            self._log("[ORCH] Mode step_by_step - execution de la premiere etape uniquement")
+            if steps:
+                execution_results = await self._execute_steps(steps[:1], session_id)
+                requires_confirmation = len(steps) > 1  # More steps remaining?
+            
+        elif execution_mode == "auto":
+            # Mode 3: auto - Execute only if safe and short
+            if not requires_confirmation:
+                self._log("[ORCH] Mode auto - execution directe autorisee")
+                execution_results = await self._execute_steps(steps, session_id)
+            else:
+                self._log("[ORCH] Mode auto - plan necessite validation, aucune execution")
+        
+        # Add prompt to memory
+        try:
+            self.memory_manager.add(session_id, prompt, role="user")
+            if response:
+                self.memory_manager.add(session_id, response, role="assistant")
+        except Exception as e:
+            self._log(f"[ORCH ERROR] Erreur memoire : {str(e)}")
+        
+        self._log(f"[ORCH] Execution terminee. Nombre de steps executees : {len(execution_results)}")
+        
+        return {
+            "intention": intention,
+            "confidence": confidence,
+            "steps": steps,
+            "response": response,
+            "execution_results": execution_results,
+            "requires_confirmation": requires_confirmation,
+            "execution_mode_used": execution_mode
+        }
+
+    async def _execute_steps(
+        self,
+        steps: List[Dict[str, Any]],
+        session_id: str
+    ) -> List[Dict[str, Any]]:
+        """
+        Execute a list of steps sequentially with logging.
+        
+        Args:
+            steps: List of action steps to execute
+            session_id: Session ID for context
+            
+        Returns:
+            List of execution results
+        """
+        results = []
+        previous_result = None
+        
+        for i, step in enumerate(steps):
+            action = step.get("action", "")
+            params = {k: v for k, v in step.items() if k != "action"}
+            
+            self._log(f"[ORCH] Execution etape {i+1}/{len(steps)} : {action}")
+            self._log(f"[ORCH] Parametres : {params}")
+            
+            # Get action handler
+            if action in self.ACTION_MAP:
+                try:
+                    # Inject previous result if needed
+                    if "input" in params and params["input"] == "$previous" and previous_result:
+                        params["data"] = previous_result
+                    
+                    # Execute action
+                    result = await self.ACTION_MAP[action](**params)
+                    
+                    self._log(f"[ORCH] Resultat etape {i+1} : {result}")
+                    
+                    results.append({
+                        "action": action,
+                        "status": "success",
+                        "data": result
+                    })
+                    previous_result = result
+                    
+                except Exception as e:
+                    self._log(f"[ORCH ERROR] Action echouee : {action}")
+                    self._log(f"[ORCH ERROR] Raison : {str(e)}")
+                    
+                    results.append({
+                        "action": action,
+                        "status": "error",
+                        "error": str(e)
+                    })
+            else:
+                self._log(f"[ORCH ERROR] Action inconnue : {action}")
+                results.append({
+                    "action": action,
+                    "status": "error",
+                    "error": f"Unknown action: {action}"
+                })
+        
+        return results
 
     async def think(self, prompt: str, context: Optional[str] = None) -> Dict[str, Any]:
         """
@@ -188,11 +383,12 @@ Available modules and actions:
 - CODE: code_execute(code), code_analyze(code), code_explain(code), code_optimize(code), code_debug(code, error)
 - SYSTEM: system_open(path), system_run(path, args), system_list_processes(), system_kill(name)
 - FILE: file_read(path), file_write(path, content), file_list(path), file_delete(path)
+- VISION: vision_analyze(image_bytes, prompt)
 - RAG: rag_query(dataset, question, top_k), rag_add(dataset, filename, content, metadata)
 - MEMORY: memory_recall(session_id, max_messages), memory_search(query, session_id)
 
 Your task:
-1. Determine the PRIMARY intention (web_search, code_execution, system_action, file_operation, rag_query, rag_add, conversation, or fallback)
+1. Determine the PRIMARY intention (web_search, code_execution, system_action, file_operation, vision_analysis, rag_query, rag_add, conversation, or fallback)
 2. Assign a confidence score (0.0 to 1.0)
 3. Create a step-by-step action plan with specific action names and parameters
 4. Provide a helpful response
@@ -313,6 +509,10 @@ Be precise and actionable. Use exact action names from the list above."""
         """Write file action."""
         return self.file_manager.write(path, content, allow=True)
     
+    
+    async def _action_vision_analyze(self, image_bytes: bytes, prompt: str = "", **kwargs) -> Dict[str, Any]:
+        """Analyze image action."""
+        return await self.vision_analyzer.analyze_image(image_bytes, prompt)
     async def _action_file_list(self, path: str = ".", **kwargs) -> Dict[str, Any]:
         """List directory action."""
         return self.file_manager.list_dir(path)
@@ -451,6 +651,7 @@ Be precise and actionable. Use exact action names from the list above."""
             "code_execution": ["execute", "analyze", "explain", "optimize", "debug"],
             "system_action": ["open_path", "run_program", "list_processes", "kill_process"],
             "file_operation": ["read", "write", "list", "delete"],
+            "vision": ["analyze_image", "analyze_screenshot", "extract_text"],
             "rag": ["query", "add_document"],
             "memory": ["recall", "search"],
             "conversation": ["general_chat", "reasoning"]

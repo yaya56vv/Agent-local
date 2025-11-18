@@ -13,6 +13,10 @@ class OrchestrateRequest(BaseModel):
     prompt: str = Field(..., description="User's input text to orchestrate")
     context: Optional[str] = Field(None, description="Optional additional context")
     session_id: Optional[str] = Field(None, description="Optional session ID for context")
+    execution_mode: Optional[str] = Field(
+        default="auto",
+        description="Execution mode: auto | plan_only | step_by_step"
+    )
 
 
 class OrchestrateResponse(BaseModel):
@@ -22,6 +26,8 @@ class OrchestrateResponse(BaseModel):
     steps: List[Dict[str, Any]] = Field(..., description="Action plan steps")
     response: str = Field(..., description="Human-readable response")
     execution_results: Optional[List[Any]] = Field(None, description="Results from plan execution")
+    requires_confirmation: bool = Field(False, description="Whether user confirmation is required")
+    execution_mode_used: str = Field("auto", description="Execution mode that was used")
 
 
 # Initialize orchestrator
@@ -59,19 +65,28 @@ async def orchestrate(request: OrchestrateRequest):
         # Use session_id from request or default
         session_id = request.session_id or "default"
         
-        # Step 1: Think - analyze and create plan
-        plan = await orch.think(request.prompt, request.context)
+        # Run orchestrator with execution_mode
+        result = await orch.run(
+            prompt=request.prompt,
+            context=request.context,
+            session_id=session_id,
+            execution_mode=request.execution_mode
+        )
         
-        # Step 2: Execute - run the plan with session_id
-        execution_result = await orch.execute_plan(plan, session_id=session_id)
+        # Sanitize response text to handle Unicode issues on Windows
+        response_text = result.get("response", "")
+        if response_text:
+            response_text = response_text.encode('ascii', 'replace').decode('ascii')
         
         # Return unified response
         return OrchestrateResponse(
-            intention=execution_result.get("intention", "fallback"),
-            confidence=execution_result.get("confidence", 0.0),
-            steps=execution_result.get("steps", []),
-            response=execution_result.get("response", ""),
-            execution_results=execution_result.get("execution_results", [])
+            intention=result.get("intention", "fallback"),
+            confidence=result.get("confidence", 0.0),
+            steps=result.get("steps", []),
+            response=response_text,
+            execution_results=result.get("execution_results", []),
+            requires_confirmation=result.get("requires_confirmation", False),
+            execution_mode_used=result.get("execution_mode_used", "auto")
         )
     
     except ValueError as e:

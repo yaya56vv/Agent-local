@@ -39,9 +39,11 @@ class GeminiLLM:
                 return f"[ERREUR GEMINI] {r.status_code}: {r.text}"
 
             response_data = r.json()
-            return response_data["candidates"][0]["content"]["parts"][0]["text"]
+            text = response_data["candidates"][0]["content"]["parts"][0]["text"]
+            # Ensure ASCII-safe encoding for Windows console
+            return text.encode('ascii', 'replace').decode('ascii')
             
         except requests.exceptions.RequestException as e:
             return f"[ERREUR GEMINI] Erreur de connexion: {str(e)}"
         except (KeyError, IndexError) as e:
-            return f"[ERREUR GEMINI] Format de réponse invalide: {str(e)}"
+            return f"[ERREUR GEMINI] Format de reponse invalide: {str(e)}"
