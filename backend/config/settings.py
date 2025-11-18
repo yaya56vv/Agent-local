@@ -6,9 +6,9 @@ from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     # --- API KEYS ---
-    GEMINI_API_KEY: str
-    KIMI_API_KEY: str
-    OPENROUTER_API_KEY: str
+    GEMINI_API_KEY: str = ""
+    KIMI_API_KEY: str = ""
+    OPENROUTER_API_KEY: str = ""
     SERPER_API_KEY: str = ""
     BRAVE_API_KEY: str = ""
     
