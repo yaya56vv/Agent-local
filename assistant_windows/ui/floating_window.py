@@ -3,10 +3,10 @@ Floating Window UI - PySide6 implementation
 Always-on-top copilot window with dark theme
 """
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QTextEdit, QLineEdit, 
-    QPushButton, QLabel, QHBoxLayout
+    QWidget, QVBoxLayout, QTextEdit, QLineEdit,
+    QPushButton, QLabel, QHBoxLayout, QInputDialog
 )
-from PySide6.QtCore import Qt, Signal, QTimer
+from PySide6.QtCore import Qt, Signal, QTimer, Slot
 from PySide6.QtGui import QFont, QPalette, QColor
 import logging
 
@@ -18,16 +18,19 @@ class FloatingWindow(QWidget):
     
     # Signals
     stop_requested = Signal()
+    exploration_requested = Signal(str)  # goal
     
     # State constants
     STATE_READY = "🟠 Prêt"
     STATE_VISION_ACTIVE = "🟢 Vision Active"
     STATE_VISION_STOPPED = "🟡 Vision Arrêtée"
+    STATE_EXPLORATION = "🔵 Exploration Active"
     STATE_OFFLINE = "🔴 Hors Ligne"
     
     def __init__(self):
         super().__init__()
         self.current_state = self.STATE_READY
+        self.mouse_controller = None
         self.init_ui()
         
     def init_ui(self):
@@ -127,8 +130,30 @@ class FloatingWindow(QWidget):
         """)
         layout.addWidget(self.input_field)
         
+        # Exploration button
+        self.exploration_button = QPushButton("🚀 Lancer Exploration")
+        self.exploration_button.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
+        self.exploration_button.setStyleSheet("""
+            QPushButton {
+                background-color: #1976D2;
+                color: white;
+                border: none;
+                border-radius: 5px;
+                padding: 8px;
+            }
+            QPushButton:hover {
+                background-color: #2196F3;
+            }
+            QPushButton:disabled {
+                background-color: #555555;
+                color: #888888;
+            }
+        """)
+        self.exploration_button.clicked.connect(self.on_exploration_clicked)
+        layout.addWidget(self.exploration_button)
+        
         # Stop button
-        self.stop_button = QPushButton("⏹ Stop")
+        self.stop_button = QPushButton("⏹ STOP (Fermer)")
         self.stop_button.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
         self.stop_button.setStyleSheet("""
             QPushButton {
@@ -213,10 +238,81 @@ class FloatingWindow(QWidget):
             for action in result["suggested_actions"]:
                 self.append_output(f"  • {action}")
             self.append_output("")
+    
+    def set_mouse_controller(self, controller):
+        """Set the mouse controller reference"""
+        self.mouse_controller = controller
+        
+        # Connect signals
+        if controller:
+            controller.log_message.connect(self.append_output)
+            controller.exploration_started.connect(self.on_exploration_started)
+            controller.exploration_stopped.connect(self.on_exploration_stopped)
+            
+    def on_exploration_clicked(self):
+        """Handle exploration button click"""
+        if not self.mouse_controller:
+            self.append_output("❌ MouseController non initialisé")
+            return
+            
+        if self.mouse_controller.is_running():
+            # Stop exploration
+            self.mouse_controller.stop_exploration("Arrêt manuel")
+        else:
+            # Ask for goal
+            goal, ok = QInputDialog.getText(
+                self,
+                "Objectif d'exploration",
+                "Quel est votre objectif ?\n(ex: 'ouvrir les paramètres réseau')",
+                QLineEdit.EchoMode.Normal,
+                ""
+            )
+            
+            if ok and goal.strip():
+                self.exploration_requested.emit(goal.strip())
+            else:
+                self.append_output("⚠️ Objectif requis pour l'exploration")
+                
+    @Slot()
+    def on_exploration_started(self):
+        """Handle exploration started"""
+        self.set_state(self.STATE_EXPLORATION)
+        self.exploration_button.setText("⏸ Arrêter Exploration")
+        self.exploration_button.setStyleSheet("""
+            QPushButton {
+                background-color: #F57C00;
+                color: white;
+                border: none;
+                border-radius: 5px;
+                padding: 8px;
+            }
+            QPushButton:hover {
+                background-color: #FF9800;
+            }
+        """)
+        
+    @Slot(str)
+    def on_exploration_stopped(self, reason: str):
+        """Handle exploration stopped"""
+        self.set_state(self.STATE_READY)
+        self.exploration_button.setText("🚀 Lancer Exploration")
+        self.exploration_button.setStyleSheet("""
+            QPushButton {
+                background-color: #1976D2;
+                color: white;
+                border: none;
+                border-radius: 5px;
+                padding: 8px;
+            }
+            QPushButton:hover {
+                background-color: #2196F3;
+            }
+        """)
             
     def on_stop_clicked(self):
-        """Handle stop button click"""
-        logger.info("Stop button clicked")
+        """Handle stop button click - KILL SWITCH"""
+        logger.info("STOP button clicked - shutting down completely")
+        self.append_output("\n🛑 ARRÊT COMPLET DE L'ASSISTANT...")
         self.stop_requested.emit()
         
     def mousePressEvent(self, event):

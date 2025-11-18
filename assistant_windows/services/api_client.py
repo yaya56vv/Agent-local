@@ -68,6 +68,65 @@ class APIClient:
             logger.error(f"Error sending screenshot: {e}", exc_info=True)
             return None
             
+    def get_next_gui_action(self, image_bytes: bytes, goal: str, history: list = None) -> Optional[Dict]:
+        """
+        Get next GUI action from backend based on screenshot and goal
+        
+        Args:
+            image_bytes: Screenshot PNG bytes
+            goal: User's objective
+            history: Recent action history (optional)
+            
+        Returns:
+            dict: Action to execute, or None if failed
+        """
+        try:
+            endpoint = f"{self.base_url}/orchestrate"
+            
+            # Prepare multipart request
+            files = {
+                'file': ('screenshot.png', io.BytesIO(image_bytes), 'image/png')
+            }
+            
+            data = {
+                'goal': goal,
+                'mode': 'gui_control',
+                'history': str(history) if history else '[]'
+            }
+            
+            logger.debug(f"Requesting next GUI action for goal: {goal}")
+            
+            response = self.session.post(
+                endpoint,
+                files=files,
+                data=data,
+                timeout=self.timeout
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                logger.info("Next GUI action received")
+                
+                # Extract action from response
+                if "action" in result:
+                    return result["action"]
+                elif "next_action" in result:
+                    return result["next_action"]
+                    
+                # Fallback: try to parse as direct action
+                if "action_type" in result:
+                    return result
+                    
+                logger.warning("No action found in response")
+                return None
+            else:
+                logger.error(f"Backend returned status {response.status_code}")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error getting next GUI action: {e}", exc_info=True)
+            return None
+    
     def check_health(self) -> bool:
         """
         Check if backend is available

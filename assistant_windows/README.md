@@ -1,12 +1,24 @@
-# Assistant Windows - Mission 6
+# Assistant Windows - Missions 6 & 7
 
-Mini-application Windows PySide6 avec hotkeys F1/F8/F9/F10 + capture d'écran + lien backend
+Mini-application Windows PySide6 avec hotkeys F1/F8/F9/F10 + capture d'écran + contrôle souris + mode exploration
 
-## 🎯 Objectif
+## 🎯 Objectifs
 
 Application Windows locale en Python utilisant PySide6, indépendante du backend FastAPI, qui sert de "petite fenêtre copilote flottante".
 
 **L'application ne tourne PAS en permanence** - elle se lance uniquement quand l'utilisateur appuie sur F1 ou F8.
+
+### Mission 6 ✅
+- Hotkeys globales F1/F8/F9/F10
+- Capture d'écran automatique
+- Analyse Vision via backend
+- Fenêtre flottante always-on-top
+
+### Mission 7 ✅
+- Contrôle complet souris/clavier
+- Mode exploration automatique
+- Détection interruption utilisateur
+- STOP kill switch (fermeture totale)
 
 ## 🔑 Hotkeys Globales
 
@@ -78,10 +90,12 @@ python main.py
    - 🟠 Prêt / En attente
    - 🟢 Vision Active (capture automatique)
    - 🟡 Vision Arrêtée (mode manuel)
+   - 🔵 Exploration Active (Mission 7)
    - 🔴 Hors Ligne (backend indisponible)
-3. **Zone de texte** pour afficher les résultats Vision
-4. **Champ de saisie** (optionnel pour cette mission)
-5. **Bouton Stop** pour fermer l'application
+3. **Zone de texte** pour afficher les résultats Vision et logs d'exploration
+4. **Champ de saisie** (optionnel)
+5. **Bouton Exploration** 🚀 Lancer/Arrêter exploration (Mission 7)
+6. **Bouton STOP** 🛑 Fermeture totale (kill switch)
 
 ## 🔄 Comportement des Hotkeys
 
@@ -218,9 +232,84 @@ Niveaux de log :
 - **WARNING** : Problèmes non critiques
 - **ERROR** : Erreurs avec stack trace
 
-## ⚠️ Limitations (Mission 6)
+## 🖱️ Mode Exploration (Mission 7)
 
-- ❌ Pas de contrôle souris (Mission 7)
+### Fonctionnement
+
+1. **Lancer l'exploration** :
+   - Cliquer sur "🚀 Lancer Exploration"
+   - Saisir un objectif (ex: "ouvrir les paramètres réseau")
+   - L'agent démarre une boucle automatique
+
+2. **Boucle d'exploration** :
+   ```
+   while exploration_active:
+       1. Capture écran
+       2. Demande prochaine action au backend
+       3. Exécute l'action (si pas d'interruption)
+       4. Log dans la fenêtre
+       5. Recommence
+   ```
+
+3. **Actions supportées** :
+   - `mouse_move` - Déplacer la souris
+   - `mouse_move_click` - Déplacer + cliquer
+   - `click` - Cliquer (gauche/droit/double)
+   - `scroll` - Défiler (haut/bas)
+   - `type_text` - Taper du texte
+   - `press_key` - Appuyer sur une touche
+   - `hotkey` - Combinaison de touches
+   - `noop` / `done` - Fin d'exploration
+
+### Interruption Utilisateur
+
+**L'exploration s'arrête immédiatement si :**
+- Vous bougez la souris (> 5 pixels)
+- Vous cliquez n'importe où
+- Vous scrollez
+
+Message affiché : "Exploration interrompue : tu as repris la main."
+
+### STOP Kill Switch
+
+Le bouton **STOP** ferme **TOTALEMENT** l'assistant :
+- ✅ Arrête l'exploration
+- ✅ Arrête la capture auto
+- ✅ Ferme la fenêtre
+- ✅ Désactive les hotkeys
+- ✅ Termine le processus
+
+Pour relancer : `run_assistant.bat` ou `python main.py`
+
+## 🔌 Backend API (Mission 7)
+
+### Endpoint d'exploration
+
+```
+POST /orchestrate
+Content-Type: multipart/form-data
+
+Paramètres:
+- file: screenshot.png
+- goal: "objectif utilisateur"
+- mode: "gui_control"
+- history: "[actions récentes]"
+
+Réponse attendue:
+{
+  "action": {
+    "action_type": "mouse_move_click",
+    "x": 1234,
+    "y": 210,
+    "button": "left",
+    "clicks": 1,
+    "comment": "Je clique sur le bouton 'Exécuter'."
+  }
+}
+```
+
+## ⚠️ Limitations
+
 - ❌ Pas de reconnaissance vocale (Mission 8)
 - ❌ Pas de synthèse vocale (Mission 8)
 
@@ -260,11 +349,22 @@ curl http://localhost:8000/health
 # Vérifier les logs du backend
 ```
 
+### L'exploration ne fonctionne pas
+
+- Vérifier que pyautogui et pynput sont installés
+- Vérifier que le backend retourne des actions valides
+- Consulter les logs dans la fenêtre
+
+### L'interruption ne fonctionne pas
+
+- Le listener souris nécessite des permissions
+- Vérifier les logs pour voir si le listener démarre
+- Essayer de relancer en tant qu'administrateur
+
 ## 🚀 Prochaines étapes
 
-- **Mission 7** : Contrôle souris automatique
 - **Mission 8** : Reconnaissance et synthèse vocale
 
 ## 📄 Licence
 
-Partie du projet Agent Local - Mission 6
+Partie du projet Agent Local - Missions 6 & 7
