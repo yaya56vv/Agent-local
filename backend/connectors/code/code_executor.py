@@ -387,3 +387,93 @@ Respond in JSON format:
                 "error": str(e),
                 "type": "optimization_error"
             }
+
+    async def explain(self, code: str, language: str = "python") -> Dict[str, Any]:
+        """
+        Explain what the code does in natural language.
+        
+        Args:
+            code: Code to explain
+            language: Programming language
+            
+        Returns:
+            dict: Explanation of the code
+        """
+        try:
+            explain_prompt = f"""You are an expert code explainer. Explain the following {language} code in clear, simple language.
+
+**Code:**
+```{language}
+{code}
+```
+
+Provide a clear explanation that covers:
+1. What the code does overall
+2. How it works step by step
+3. Any important details or edge cases
+
+Respond in JSON format:
+{{
+  "explanation": "Clear, detailed explanation here",
+  "key_points": ["Point 1", "Point 2", "Point 3"],
+  "complexity": "simple|moderate|complex"
+}}"""
+
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(
+                    f"{self.kimi_endpoint}/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {self.kimi_api_key}",
+                        "Content-Type": "application/json"
+                    },
+                    json={
+                        "model": "moonshot-v1-8k",
+                        "messages": [
+                            {
+                                "role": "system",
+                                "content": "You are an expert code explainer. Always respond with valid JSON."
+                            },
+                            {
+                                "role": "user",
+                                "content": explain_prompt
+                            }
+                        ],
+                        "temperature": 0.3,
+                    }
+                )
+                
+                if response.status_code != 200:
+                    return {
+                        "status": "error",
+                        "error": f"Kimi API error: {response.status_code}"
+                    }
+                
+                result = response.json()
+                content = result["choices"][0]["message"]["content"]
+                
+                # Parse JSON response
+                try:
+                    if "```json" in content:
+                        json_start = content.find("```json") + 7
+                        json_end = content.find("```", json_start)
+                        content = content[json_start:json_end].strip()
+                    
+                    explain_data = json.loads(content)
+                    
+                    return {
+                        "status": "success",
+                        "explanation": explain_data.get("explanation", content)
+                    }
+                    
+                except json.JSONDecodeError:
+                    return {
+                        "status": "success",
+                        "explanation": content
+                    }
+        
+        except Exception as e:
+            return {
+                "status": "error",
+                "error": str(e),
+                "type": "explanation_error"
+            }

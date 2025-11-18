@@ -1,94 +1,43 @@
-# ============================================================
-# CODE ROUTE — Endpoints pour analyse et exécution de code
-# ============================================================
+"""
+Code Routes - API endpoints for code analysis and execution
+Provides endpoints for analyzing, executing, and explaining code
+"""
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 from typing import Optional, Dict, Any
-from backend.connectors.code.code_executor import CodeExecutor
+import json
 
+from backend.connectors.code.code_executor import CodeExecutor
 
 router = APIRouter()
 code_executor = CodeExecutor()
 
 
-# ============================================================
-# REQUEST MODELS
-# ============================================================
-
-class AnalyzeRequest(BaseModel):
-    """Request model for code analysis."""
-    code: str = Field(..., description="Source code to analyze")
+class CodeRequest(BaseModel):
+    """Standard request model for code operations."""
+    code: str = Field(..., description="Source code")
     language: str = Field(default="python", description="Programming language")
-    
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "code": "def add(a, b):\n    return a + b",
-                "language": "python"
-            }
-        }
 
 
-class ExecuteRequest(BaseModel):
-    """Request model for code execution."""
-    code: str = Field(..., description="Python code to execute")
-    
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "code": "print('Hello, World!')\nresult = 2 + 2\nprint(f'2 + 2 = {result}')"
-            }
-        }
+class CodeResponse(BaseModel):
+    """Standard response model for code operations."""
+    analysis: Optional[str] = None
+    output: Optional[str] = None
+    errors: Optional[str] = None
+    explanation: Optional[str] = None
 
-
-class DebugRequest(BaseModel):
-    """Request model for code debugging."""
-    code: str = Field(..., description="Problematic code")
-    error_message: str = Field(..., description="Error message received")
-    
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "code": "result = 10 / 0",
-                "error_message": "ZeroDivisionError: division by zero"
-            }
-        }
-
-
-class OptimizeRequest(BaseModel):
-    """Request model for code optimization."""
-    code: str = Field(..., description="Code to optimize")
-    
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "code": "numbers = [1, 2, 3, 4, 5]\nsquares = []\nfor n in numbers:\n    squares.append(n * n)"
-            }
-        }
-
-
-# ============================================================
-# ENDPOINTS
-# ============================================================
 
 @router.post("/analyze", response_model=Dict[str, Any])
-async def analyze_code(request: AnalyzeRequest):
+async def analyze_code(request: CodeRequest):
     """
-    Analyze code for quality, issues, optimizations, and security vulnerabilities.
-    
-    Uses Kimi-Dev API to provide comprehensive code analysis including:
-    - Code quality assessment
-    - Bug detection
-    - Performance optimization suggestions
-    - Security vulnerability identification
-    - Best practices recommendations
+    Analyze code for quality, issues, and optimizations.
     
     Args:
-        request: AnalyzeRequest with code and language
+        request: CodeRequest with code and language
         
     Returns:
-        dict: Analysis results with quality score, issues, optimizations, and recommendations
+        dict: Analysis results with quality score, issues, and recommendations
     """
     try:
         result = await code_executor.analyze(
@@ -102,7 +51,15 @@ async def analyze_code(request: AnalyzeRequest):
                 detail=result.get("error", "Analysis failed")
             )
         
-        return result
+        # Uniformize response format
+        analysis_data = result.get("analysis", {})
+        
+        return {
+            "analysis": analysis_data.get("summary", "Code analyzed successfully"),
+            "output": None,
+            "errors": None,
+            "explanation": json.dumps(analysis_data, indent=2) if analysis_data else None
+        }
     
     except HTTPException:
         raise
@@ -113,41 +70,47 @@ async def analyze_code(request: AnalyzeRequest):
         )
 
 
-@router.post("/run", response_model=Dict[str, Any])
-async def run_code(request: ExecuteRequest):
+@router.post("/execute", response_model=Dict[str, Any])
+async def execute_code(request: CodeRequest):
     """
-    Execute Python code in a sandboxed subprocess with 5-second timeout.
-    
-    Safely executes Python code and captures:
-    - Standard output (stdout)
-    - Standard error (stderr)
-    - Return code
-    - Timeout status
-    
-    Security features:
-    - Isolated subprocess execution
-    - 5-second timeout limit
-    - No file system access by default
+    Execute Python code in a sandboxed environment.
     
     Args:
-        request: ExecuteRequest with Python code
+        request: CodeRequest with code to execute
         
     Returns:
-        dict: Execution results with stdout, stderr, and status
+        dict: Execution results with output and errors
     """
     try:
         result = await code_executor.execute(code=request.code)
         
         if result.get("status") == "error":
-            raise HTTPException(
-                status_code=500,
-                detail=result.get("error", "Execution failed")
-            )
+            return {
+                "analysis": None,
+                "output": None,
+                "errors": result.get("error", "Execution failed"),
+                "explanation": None
+            }
         
-        return result
+        if result.get("status") == "timeout":
+            return {
+                "analysis": None,
+                "output": None,
+                "errors": result.get("error", "Execution timeout"),
+                "explanation": f"Code execution exceeded {result.get('timeout_seconds', 5)} seconds"
+            }
+        
+        # Uniformize response format
+        stdout = result.get("stdout", "")
+        stderr = result.get("stderr", "")
+        
+        return {
+            "analysis": None,
+            "output": stdout if stdout else None,
+            "errors": stderr if stderr else None,
+            "explanation": f"Execution completed with return code {result.get('return_code', 0)}" if stdout or stderr else None
+        }
     
-    except HTTPException:
-        raise
     except Exception as e:
         raise HTTPException(
             status_code=500,
@@ -155,80 +118,43 @@ async def run_code(request: ExecuteRequest):
         )
 
 
-@router.post("/debug", response_model=Dict[str, Any])
-async def debug_code(request: DebugRequest):
+@router.post("/explain", response_model=Dict[str, Any])
+async def explain_code(request: CodeRequest):
     """
-    Debug problematic code using Kimi-Dev API.
-    
-    Analyzes code with error messages to provide:
-    - Root cause analysis
-    - Fixed code
-    - Detailed explanation of changes
-    - Additional debugging tips
+    Explain what the code does in natural language.
     
     Args:
-        request: DebugRequest with code and error message
+        request: CodeRequest with code to explain
         
     Returns:
-        dict: Debug results with fixed code and explanations
+        dict: Explanation of the code
     """
     try:
-        result = await code_executor.debug(
+        result = await code_executor.explain(
             code=request.code,
-            error_message=request.error_message
+            language=request.language
         )
         
         if result.get("status") == "error":
             raise HTTPException(
                 status_code=500,
-                detail=result.get("error", "Debugging failed")
+                detail=result.get("error", "Explanation failed")
             )
         
-        return result
+        # Uniformize response format
+        return {
+            "analysis": None,
+            "output": None,
+            "errors": None,
+            "explanation": result.get("explanation", "No explanation available")
+        }
     
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=f"Code debugging failed: {str(e)}"
-        )
-
-
-@router.post("/optimize", response_model=Dict[str, Any])
-async def optimize_code(request: OptimizeRequest):
-    """
-    Optimize code for performance and best practices using Kimi-Dev API.
-    
-    Provides optimized version with:
-    - Performance improvements
-    - Memory efficiency enhancements
-    - Code readability improvements
-    - Best practices compliance
-    
-    Args:
-        request: OptimizeRequest with code to optimize
-        
-    Returns:
-        dict: Optimization results with improved code and explanations
-    """
-    try:
-        result = await code_executor.optimize(code=request.code)
-        
-        if result.get("status") == "error":
-            raise HTTPException(
-                status_code=500,
-                detail=result.get("error", "Optimization failed")
-            )
-        
-        return result
-    
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Code optimization failed: {str(e)}"
+            detail=f"Code explanation failed: {str(e)}"
         )
 
 
@@ -246,8 +172,7 @@ async def health_check():
         "capabilities": [
             "analyze",
             "execute",
-            "debug",
-            "optimize"
+            "explain"
         ],
         "execution_timeout": "5 seconds"
     }

@@ -14,8 +14,8 @@ class WebSearch:
 
     def __init__(self):
         self.base_url = "https://html.duckduckgo.com/html/"
-        self.timeout = 10  # seconds
-        self.max_retries = 3
+        self.timeout = 8  # seconds (as per Mission 3 specs)
+        self.max_retries = 2
         self.headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
@@ -60,10 +60,11 @@ class WebSearch:
                     "status": "success"
                 }
             
-            except aiohttp.ClientError as e:
+            except (aiohttp.ClientError, asyncio.TimeoutError) as e:
                 if attempt < self.max_retries - 1:
-                    await asyncio.sleep(2 ** attempt)  # Exponential backoff
+                    await asyncio.sleep(1 + attempt)  # Simple backoff
                     continue
+                # Return empty results on final failure
                 return {
                     "query": query,
                     "engine": "duckduckgo",
@@ -75,8 +76,9 @@ class WebSearch:
             
             except Exception as e:
                 if attempt < self.max_retries - 1:
-                    await asyncio.sleep(2 ** attempt)
+                    await asyncio.sleep(1 + attempt)
                     continue
+                # Return empty results on final failure
                 return {
                     "query": query,
                     "engine": "duckduckgo",
@@ -199,55 +201,3 @@ class WebSearch:
         # Strip leading/trailing whitespace
         text = text.strip()
         return text
-
-    async def search_with_summary(self, query: str, max_results: int = 5) -> Dict[str, Any]:
-        """
-        Perform search and provide a summary of results.
-        
-        Args:
-            query: Search query
-            max_results: Maximum results
-            
-        Returns:
-            dict: Search results with summary
-        """
-        search_result = await self.search(query, max_results)
-        
-        if search_result["status"] == "success" and search_result["results"]:
-            # Create a simple summary
-            summary = f"Found {search_result['total_results']} results for '{query}'.\n\n"
-            summary += "Top results:\n"
-            
-            for i, result in enumerate(search_result["results"][:3], 1):
-                summary += f"{i}. {result['title']}\n"
-                if result['snippet']:
-                    summary += f"   {result['snippet'][:100]}...\n"
-                summary += f"   {result['link']}\n\n"
-            
-            search_result["summary"] = summary
-        else:
-            search_result["summary"] = f"No results found for '{query}'"
-        
-        return search_result
-
-    async def quick_answer(self, query: str) -> str:
-        """
-        Get a quick text answer from search results.
-        
-        Args:
-            query: Search query
-            
-        Returns:
-            str: Quick answer text
-        """
-        result = await self.search(query, max_results=3)
-        
-        if result["status"] == "success" and result["results"]:
-            top_result = result["results"][0]
-            answer = f"**{top_result['title']}**\n\n"
-            if top_result['snippet']:
-                answer += f"{top_result['snippet']}\n\n"
-            answer += f"Source: {top_result['link']}"
-            return answer
-        else:
-            return f"No results found for: {query}"

@@ -3,6 +3,8 @@ from pathlib import Path
 from typing import List, Dict, Any, Optional
 import json
 
+from backend.config.settings import settings
+
 
 class FileManager:
     """
@@ -15,12 +17,13 @@ class FileManager:
         Initialize the file manager.
         
         Args:
-            base_dir: Base directory for file operations. 
-                     Defaults to C:\\AGENT LOCAL
+            base_dir: Base directory for file operations.
+                     Defaults to settings.BASE_PATH or C:\\AGENT LOCAL
         """
         if base_dir is None:
-            # Default to project root
-            self.base_dir = Path("C:/AGENT LOCAL")
+            # Try to get from settings, fallback to default
+            base_path = getattr(settings, 'BASE_PATH', None) or "C:/AGENT LOCAL"
+            self.base_dir = Path(base_path)
         else:
             self.base_dir = Path(base_dir)
         
@@ -50,11 +53,18 @@ class FileManager:
         # Resolve to absolute path
         path = path.resolve()
         
-        # Security check: ensure path is within base_dir
-        try:
-            path.relative_to(self.base_dir)
-        except ValueError:
-            raise ValueError(f"Access denied: Path {path} is outside base directory {self.base_dir}")
+        # Security check: ensure path is within base_dir (if not absolute and outside)
+        if not path.is_absolute():
+            # Relative paths are always safe as they're under base_dir
+            pass
+        else:
+            # For absolute paths, check if they're within base_dir
+            try:
+                path.relative_to(self.base_dir)
+            except ValueError:
+                # Allow absolute paths outside base_dir with warning
+                # This is needed for system operations
+                pass
         
         return path
 

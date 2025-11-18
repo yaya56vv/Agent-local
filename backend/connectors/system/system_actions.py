@@ -9,6 +9,15 @@ import platform
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 
+# Safe mode configuration
+ALLOW_UNSAFE = False  # Set to True to allow potentially dangerous operations
+CRITICAL_PATHS = [
+    "C:/Windows/System32",
+    "C:/Windows/SysWOW64",
+    "C:/Program Files",
+    "C:/Program Files (x86)"
+]
+
 
 # Vérifier si psutil est disponible
 try:
@@ -39,6 +48,27 @@ class SystemActions:
         self.platform = platform.system()
         self.is_windows = self.platform == "Windows"
 
+    def _is_safe_path(self, path: str) -> bool:
+        """
+        Check if a path is safe to access.
+        
+        Args:
+            path: Path to check
+            
+        Returns:
+            bool: True if path is safe, False otherwise
+        """
+        if ALLOW_UNSAFE:
+            return True
+        
+        path_str = str(Path(path).resolve())
+        
+        for critical_path in CRITICAL_PATHS:
+            if path_str.startswith(critical_path):
+                return False
+        
+        return True
+
     def _check_permission(self, allow: bool) -> None:
         """
         Vérifie que l'autorisation explicite est donnée.
@@ -53,6 +83,48 @@ class SystemActions:
             raise PermissionDeniedError(
                 "Action refused: allow=True required for security"
             )
+
+    def open_path(self, path: str) -> Dict[str, Any]:
+        """
+        Open a file or folder with the default application.
+        Automatically detects if path is a file or folder.
+        
+        Args:
+            path: Path to open
+            
+        Returns:
+            Dict with status and message
+            
+        Raises:
+            SystemActionsError: If operation fails
+        """
+        path_obj = Path(path)
+        
+        if not path_obj.exists():
+            raise SystemActionsError(f"Path not found: {path}")
+        
+        # Check if path is safe
+        if not self._is_safe_path(path):
+            raise PermissionDeniedError(f"Access denied to critical system path: {path}")
+        
+        try:
+            if self.is_windows:
+                os.startfile(str(path_obj))
+            else:
+                if platform.system() == "Darwin":  # macOS
+                    subprocess.Popen(["open", str(path_obj)])
+                else:  # Linux
+                    subprocess.Popen(["xdg-open", str(path_obj)])
+            
+            path_type = "folder" if path_obj.is_dir() else "file"
+            return {
+                "success": True,
+                "message": f"{path_type.capitalize()} opened: {path}",
+                "path": str(path_obj),
+                "type": path_type
+            }
+        except Exception as e:
+            raise SystemActionsError(f"Failed to open path: {str(e)}")
 
     def open_file(self, path: str, allow: bool = False) -> Dict[str, Any]:
         """
@@ -140,8 +212,7 @@ class SystemActions:
         except Exception as e:
             raise SystemActionsError(f"Failed to open folder: {str(e)}")
 
-    def run_program(self, path: str, args: Optional[List[str]] = None,
-                    allow: bool = False) -> Dict[str, Any]:
+    def run_program(self, path: str, args: Optional[List[str]] = None) -> Dict[str, Any]:
         """
         Lance un programme.
 
@@ -157,9 +228,11 @@ class SystemActions:
             PermissionDeniedError: Si allow n'est pas True
             SystemActionsError: Si l'opération échoue
         """
-        self._check_permission(allow)
-
         path_obj = Path(path)
+        
+        # Check if path is safe
+        if not self._is_safe_path(path):
+            raise PermissionDeniedError(f"Access denied to critical system path: {path}")
 
         if not path_obj.exists():
             raise SystemActionsError(f"Program not found: {path}")
@@ -185,7 +258,7 @@ class SystemActions:
         except Exception as e:
             raise SystemActionsError(f"Failed to run program: {str(e)}")
 
-    def list_processes(self, allow: bool = False) -> Dict[str, Any]:
+    def list_processes(self) -> Dict[str, Any]:
         """
         Liste tous les processus en cours.
 
@@ -199,8 +272,6 @@ class SystemActions:
             PermissionDeniedError: Si allow n'est pas True
             SystemActionsError: Si psutil n'est pas disponible
         """
-        self._check_permission(allow)
-
         if not PSUTIL_AVAILABLE:
             raise SystemActionsError(
                 "psutil module not available. Install with: pip install psutil"
@@ -230,7 +301,7 @@ class SystemActions:
         except Exception as e:
             raise SystemActionsError(f"Failed to list processes: {str(e)}")
 
-    def kill_process(self, name: str, allow: bool = False) -> Dict[str, Any]:
+    def kill_process(self, name: str) -> Dict[str, Any]:
         """
         Termine un processus par son nom.
 
@@ -245,8 +316,6 @@ class SystemActions:
             PermissionDeniedError: Si allow n'est pas True
             SystemActionsError: Si psutil n'est pas disponible
         """
-        self._check_permission(allow)
-
         if not PSUTIL_AVAILABLE:
             raise SystemActionsError(
                 "psutil module not available. Install with: pip install psutil"

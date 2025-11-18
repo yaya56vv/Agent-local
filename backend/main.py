@@ -12,6 +12,7 @@ from backend.routes.search_route import router as search_router
 from backend.routes.code_route import router as code_router
 from backend.routes.files_route import router as files_router
 from backend.routes.rag_routes import router as rag_router
+from backend.routes.system_route import router as system_router
 
 app = FastAPI(title="Agent Local")
 
@@ -21,6 +22,7 @@ app.include_router(search_router, prefix="/search", tags=["search"])
 app.include_router(code_router, prefix="/code", tags=["code"])
 app.include_router(files_router, prefix="/files", tags=["files"])
 app.include_router(rag_router, prefix="/rag", tags=["rag"])
+app.include_router(system_router, prefix="/system", tags=["system"])
 
 app.add_middleware(
     CORSMiddleware,
