@@ -56,19 +56,22 @@ async def orchestrate(request: OrchestrateRequest):
         else:
             orch = orchestrator
         
+        # Use session_id from request or default
+        session_id = request.session_id or "default"
+        
         # Step 1: Think - analyze and create plan
         plan = await orch.think(request.prompt, request.context)
         
-        # Step 2: Execute - run the plan
-        execution_result = await orch.execute_plan(plan)
+        # Step 2: Execute - run the plan with session_id
+        execution_result = await orch.execute_plan(plan, session_id=session_id)
         
-        # Combine results
+        # Return unified response
         return OrchestrateResponse(
-            intention=plan.get("intention", "general"),
-            confidence=plan.get("confidence", 0.0),
-            steps=plan.get("steps", []),
-            response=plan.get("response", ""),
-            execution_results=execution_result.get("results", [])
+            intention=execution_result.get("intention", "fallback"),
+            confidence=execution_result.get("confidence", 0.0),
+            steps=execution_result.get("steps", []),
+            response=execution_result.get("response", ""),
+            execution_results=execution_result.get("execution_results", [])
         )
     
     except ValueError as e:
