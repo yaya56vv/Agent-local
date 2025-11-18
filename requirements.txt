@@ -1,0 +1,23 @@
+# FastAPI et serveur
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+python-multipart>=0.0.6
+
+# HTTP client
+aiohttp>=3.9.0
+httpx>=0.25.0
+
+# Embeddings et RAG
+numpy>=1.24.0
+chromadb>=0.4.0
+
+# DuckDuckGo search
+duckduckgo-search>=4.0.0
+
+# Configuration
+pydantic>=2.0.0
+python-dotenv>=1.0.0
+
+# Utilitaires
+python-docx>=1.0.0
+PyPDF2>=3.0.0

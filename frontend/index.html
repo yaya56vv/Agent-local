@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🤖 Agent Local - Interface de Contrôle</title>
+    <link rel="stylesheet" href="/ui/style.css">
+</head>
+
+<body>
+
+<!-- HEADER -->
+<header>
+    <h1>🤖 Agent Local</h1>
+    <p class="subtitle">Interface de contrôle et conversation</p>
+    <div class="session-info">
+        <small>Session ID: <span id="session-id">Chargement...</span></small>
+        <div id="status-bar" class="status-bar status-unknown">⚪ Statut inconnu</div>
+    </div>
+</header>
+
+<div class="container">
+    <div class="main-layout">
+
+        <!-- ========== SECTION CHAT ========== -->
+        <section class="chat-section">
+            <h2>💬 Conversation</h2>
+            
+            <div id="chat-window" class="chat-history"></div>
+            
+            <div class="chat-input-container">
+                <input
+                    id="user-message"
+                    type="text"
+                    placeholder="Tapez votre message ici..."
+                    autocomplete="off"
+                />
+                <button class="btn-primary" onclick="sendMessage()">Envoyer</button>
+            </div>
+
+            <div class="chat-controls">
+                <button class="btn-small" onclick="testHealth()">🏥 Test Santé</button>
+                <button class="btn-small" onclick="showMemory()">💾 Voir Mémoire</button>
+                <button class="btn-small" onclick="clearChat()">🗑️ Effacer Chat</button>
+                <button class="btn-small" onclick="openRAG()">📚 Ouvrir RAG</button>
+            </div>
+        </section>
+
+        <!-- ========== SECTION RAG ========== -->
+        <section class="rag-section">
+            <h2>📚 RAG (Retrieval-Augmented Generation)</h2>
+            
+            <div class="form-group">
+                <label for="dataset">Nom du dataset</label>
+                <input 
+                    id="dataset" 
+                    class="input-field" 
+                    type="text" 
+                    placeholder="ex: documentation, notes, projets..."
+                />
+            </div>
+
+            <div class="divider"></div>
+
+            <div class="form-group">
+                <label for="rag-text">Ajouter du contenu au dataset</label>
+                <textarea 
+                    id="rag-text" 
+                    class="textarea-field" 
+                    rows="4" 
+                    placeholder="Collez ou tapez le contenu à indexer..."
+                ></textarea>
+                <button class="btn-secondary" onclick="addToRAG()">➕ Ajouter au RAG</button>
+            </div>
+
+            <div class="divider"></div>
+
+            <div class="form-group">
+                <label for="rag-question">Interroger le dataset</label>
+                <input 
+                    id="rag-question" 
+                    class="input-field" 
+                    type="text" 
+                    placeholder="Posez une question sur le dataset..."
+                />
+                <button class="btn-secondary" onclick="askRAG()">🔍 Interroger</button>
+            </div>
+
+            <div class="form-group">
+                <label>Réponse du RAG</label>
+                <pre id="rag-answer" class="rag-answer"></pre>
+            </div>
+        </section>
+
+        <!-- ========== SECTION LOGS ========== -->
+        <section class="logs-section">
+            <h2>📄 Logs système</h2>
+            
+            <div class="logs-controls">
+                <button class="btn-small" onclick="clearLogs()">🗑️ Effacer</button>
+                <button class="btn-small" onclick="toggleAutoScroll()">
+                    📜 Auto-scroll: <span id="autoscroll-status">ON</span>
+                </button>
+            </div>
+
+            <div id="logs-window" class="logs-window"></div>
+        </section>
+
+    </div>
+</div>
+
+<!-- SCRIPT -->
+<script src="/ui/app.js"></script>
+
+</body>
+</html>
