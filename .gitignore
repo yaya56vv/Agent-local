@@ -1,24 +1,34 @@
-venv/
+# --- ENVIRONNEMENT ---
+.env
+backend/config/.env
+
+# --- PYTHON ---
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
 
-# Local env
-.env
-backend/config/.env
+# --- ENV VIRTUEL ---
+venv/
 
-# Memory
-memory_data/
-rag/rag.db
-
-# Logs
+# --- FICHIERS TEMPORAIRES & CACHE ---
 *.log
 *.tmp
 *.cache
 
-# VS Code
+# --- RAG & MEMOIRE ---
+rag/rag.db
+memory_data/
+
+# --- VS CODE ---
 .vscode/
 
-# Node
+# --- NODE ---
 node_modules/
+
+# --- DOCUMENTATION GÉNÉRÉE ---
+docs/
+
+# --- SYSTEME ---
+.DS_Store
+Thumbs.db
