@@ -1,4 +1,4 @@
-# Assistant Windows - Missions 6, 7 & 8
+# Assistant Windows - Missions 6, 7, 8 & 9
 
 Mini-application Windows PySide6 avec hotkeys F1/F2/F8/F9/F10 + capture d'écran + contrôle souris + mode exploration + voix
 
@@ -26,14 +26,22 @@ Application Windows locale en Python utilisant PySide6, indépendante du backend
 - Mode mini-bulle flottante
 - Intégration voix + orchestrateur
 
-## 🔑 Hotkeys Globales
+## 🔑 Hotkeys Globales (Mission 9 - Pure F-keys)
+
+**Toutes les touches sont des F-keys PURES, sans modificateurs (Ctrl/Alt/Win).**
 
 | Touche | Action | Description |
 |--------|--------|-------------|
-| **F1** | Lancer/Afficher fenêtre | Ouvre la fenêtre sans démarrer la capture |
-| **F8** | Lancer + Capture auto | Ouvre la fenêtre ET démarre la capture automatique |
-| **F9** | Arrêter capture | Arrête la capture automatique (fenêtre reste ouverte) |
-| **F10** | Capture unique | Fait un screenshot ponctuel |
+| **F1** | Afficher fenêtre | Ouvre la fenêtre volante sans démarrer la capture |
+| **F2** | Push-to-talk | Active/désactive l'écoute vocale (reconnaissance vocale) |
+| **F8** | Démarrer capture auto | Démarre la capture automatique d'écran (toutes les 2s) |
+| **F9** | Arrêter capture auto | Arrête la capture automatique (fenêtre reste ouverte) |
+| **F10** | Capture unique | Fait un screenshot ponctuel et l'analyse |
+
+### Configuration BIOS HP
+Les touches F sont maintenant libérées dans le BIOS :
+- **Action Keys Mode = Disabled**
+- Pas besoin d'appuyer sur Fn pour utiliser F1-F12
 
 ## 📁 Architecture
 
@@ -107,13 +115,22 @@ python main.py
 
 ## 🔄 Comportement des Hotkeys
 
-### F1 - Afficher la fenêtre
+### F1 - Afficher la fenêtre volante
 
 ```
 - Lance l'app si pas déjà lancée
 - Affiche la fenêtre si cachée
 - Ne déclenche PAS la capture
 - État : 🟠 Prêt
+```
+
+### F2 - Push-to-talk (voix)
+
+```
+- Active/désactive l'écoute vocale
+- Affiche la fenêtre si cachée
+- Permet de parler à l'assistant
+- État : 🎙 En écoute... (quand actif)
 ```
 
 ### F8 - Démarrer capture automatique
@@ -186,16 +203,25 @@ Content-Type: multipart/form-data
 - **Retry** : Non (pour éviter la saturation)
 - **État offline** : Affiché si backend indisponible
 
-## 🧪 Tests
+## 🧪 Tests (Mission 9)
 
-### Test F1
+### Test F1 - Afficher fenêtre
 ```
 1. Lancer l'app avec F1
 2. Vérifier que la fenêtre s'ouvre
 3. Vérifier l'état : 🟠 Prêt
 ```
 
-### Test F8
+### Test F2 - Push-to-talk
+```
+1. Appuyer sur F2
+2. Vérifier que la fenêtre s'ouvre
+3. Vérifier l'état : 🎙 En écoute...
+4. Parler dans le micro
+5. Vérifier que la transcription s'affiche
+```
+
+### Test F8 - Démarrer capture auto
 ```
 1. Appuyer sur F8
 2. Vérifier que la fenêtre s'ouvre
@@ -203,7 +229,7 @@ Content-Type: multipart/form-data
 4. Vérifier que les captures s'affichent toutes les 2s
 ```
 
-### Test F9
+### Test F9 - Arrêter capture auto
 ```
 1. Avec F8 actif, appuyer sur F9
 2. Vérifier que la capture s'arrête
@@ -211,7 +237,7 @@ Content-Type: multipart/form-data
 4. Vérifier que la fenêtre reste ouverte
 ```
 
-### Test F10
+### Test F10 - Capture unique
 ```
 1. Appuyer sur F10
 2. Vérifier qu'une capture unique est faite
@@ -219,11 +245,12 @@ Content-Type: multipart/form-data
 4. Vérifier que l'état ne change pas
 ```
 
-### Test Stop
+### Test STOP - Kill switch
 ```
-1. Cliquer sur le bouton Stop
+1. Cliquer sur le bouton STOP
 2. Vérifier que la fenêtre se ferme
 3. Vérifier que les hotkeys sont désactivées
+4. Vérifier que tous les processus s'arrêtent
 ```
 
 ## 📝 Logs
@@ -316,10 +343,16 @@ Réponse attendue:
 }
 ```
 
-## ⚠️ Limitations
+## ✅ Fonctionnalités complètes
 
-- ❌ Pas de reconnaissance vocale (Mission 8)
-- ❌ Pas de synthèse vocale (Mission 8)
+- ✅ Hotkeys F1/F2/F8/F9/F10 (pure F-keys, sans modificateurs)
+- ✅ Capture d'écran automatique et unique
+- ✅ Analyse Vision via backend
+- ✅ Contrôle souris/clavier
+- ✅ Mode exploration automatique
+- ✅ Reconnaissance vocale (push-to-talk F2)
+- ✅ Synthèse vocale (TTS)
+- ✅ Kill switch (STOP)
 
 ## 🔧 Dépannage
 
@@ -337,6 +370,8 @@ pip install -r requirements.txt
 
 - Vérifier que l'application tourne en tant qu'administrateur
 - Vérifier qu'aucune autre application n'utilise ces touches
+- **Vérifier le BIOS HP** : Action Keys Mode doit être **Disabled**
+- Si une touche F ne s'enregistre pas, un message s'affichera dans la console
 
 ### La capture ne fonctionne pas
 
@@ -369,10 +404,13 @@ curl http://localhost:8000/health
 - Vérifier les logs pour voir si le listener démarre
 - Essayer de relancer en tant qu'administrateur
 
-## 🚀 Prochaines étapes
+## 📝 Historique des missions
 
-- **Mission 8** : Reconnaissance et synthèse vocale
+- ✅ **Mission 6** : Hotkeys + capture d'écran + fenêtre flottante
+- ✅ **Mission 7** : Contrôle souris + mode exploration + kill switch
+- ✅ **Mission 8** : Reconnaissance vocale + synthèse vocale
+- ✅ **Mission 9** : Remapping hotkeys vers F-keys pures (F1/F2/F8/F9/F10)
 
 ## 📄 Licence
 
-Partie du projet Agent Local - Missions 6 & 7
+Partie du projet Agent Local - Missions 6, 7, 8 & 9

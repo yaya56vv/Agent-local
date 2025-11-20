@@ -10,15 +10,15 @@ import hashlib
 from typing import List, Dict, Any, Optional
 from pathlib import Path
 import numpy as np
-import aiohttp
+# import aiohttp  <-- Removed Gemini dependency
 import asyncio
 from datetime import datetime
-
+from sentence_transformers import SentenceTransformer
 
 class RAGStore:
     """
     RAG Store for managing documents with embeddings.
-    Uses SQLite for storage and Gemini API for embeddings.
+    Uses SQLite for storage and Local Embeddings (Sentence-Transformers).
     """
     
     def __init__(self, db_path: str = "rag/rag.db"):
@@ -34,9 +34,15 @@ class RAGStore:
             db_path = str(base_dir / db_path)
         
         self.db_path = db_path
-        self.gemini_api_key = os.getenv("GEMINI_API_KEY")
-        self.embedding_model = "models/text-embedding-004"
-        self.embedding_url = f"https://generativelanguage.googleapis.com/v1beta/{self.embedding_model}:embedContent"
+        
+        # Initialize Local Embedding Model
+        # all-MiniLM-L6-v2 is fast and effective (384 dimensions)
+        try:
+            self.embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
+            print("[RAG] Local embedding model loaded: all-MiniLM-L6-v2")
+        except Exception as e:
+            print(f"[RAG] Error loading local embedding model: {e}")
+            self.embedding_model = None
         
         # Create directory if needed
         os.makedirs(os.path.dirname(db_path), exist_ok=True)
@@ -94,7 +100,7 @@ class RAGStore:
     
     async def _get_embedding(self, text: str) -> List[float]:
         """
-        Get embedding vector from Gemini API.
+        Get embedding vector from Local Model.
         
         Args:
             text: Text to embed
@@ -102,36 +108,19 @@ class RAGStore:
         Returns:
             List of floats representing the embedding vector
         """
-        if not self.gemini_api_key:
-            raise ValueError("GEMINI_API_KEY not set in environment")
+        if not self.embedding_model:
+            raise Exception("Embedding model not initialized")
+            
+        # Run in executor to avoid blocking async loop
+        loop = asyncio.get_event_loop()
+        embedding = await loop.run_in_executor(
+            None, 
+            lambda: self.embedding_model.encode(text).tolist()
+        )
         
-        payload = {
-            "model": self.embedding_model,
-            "content": {
-                "parts": [{"text": text}]
-            }
-        }
+        print(f"-> Generation locale : vecteur de {len(embedding)} dimensions")
         
-        params = {"key": self.gemini_api_key}
-        
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                self.embedding_url,
-                json=payload,
-                params=params,
-                timeout=aiohttp.ClientTimeout(total=30)
-            ) as response:
-                if response.status != 200:
-                    error_text = await response.text()
-                    raise Exception(f"Gemini embedding API error: {error_text}")
-                
-                data = await response.json()
-                embedding = data.get("embedding", {}).get("values", [])
-                
-                if not embedding:
-                    raise Exception("No embedding returned from Gemini API")
-                
-                return embedding
+        return embedding
     
     def _chunk_text(self, text: str, chunk_size: int = 1000, overlap: int = 200) -> List[str]:
         """
@@ -464,3 +453,45 @@ class RAGStore:
         
         conn.commit()
         conn.close()
+    
+    def cleanup_memory(self, retention_days: int = 1) -> Dict[str, Any]:
+        """
+        Clean up old documents from temporary datasets.
+        
+        Args:
+            retention_days: Number of days to keep temporary data
+            
+        Returns:
+            dict: Cleanup statistics
+        """
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        # Calculate cutoff date
+        cutoff_date = datetime.utcnow().isoformat()
+        # Simple string comparison works for ISO dates, but let's be safe and just delete 'scratchpad' older than X
+        
+        # Delete from scratchpad
+        cursor.execute("""
+            SELECT id FROM documents 
+            WHERE dataset = 'scratchpad' 
+            AND created_at < date('now', '-' || ? || ' days')
+        """, (str(retention_days),))
+        
+        doc_ids = [row[0] for row in cursor.fetchall()]
+        
+        deleted_count = 0
+        for doc_id in doc_ids:
+            cursor.execute("DELETE FROM chunks WHERE document_id = ?", (doc_id,))
+            cursor.execute("DELETE FROM documents WHERE id = ?", (doc_id,))
+            deleted_count += 1
+            
+        conn.commit()
+        conn.close()
+        
+        return {
+            "status": "success",
+            "deleted_documents": deleted_count,
+            "dataset": "scratchpad",
+            "retention_days": retention_days
+        }

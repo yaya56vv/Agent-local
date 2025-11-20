@@ -1,12 +1,14 @@
 import re
 import json
 from typing import Dict, List, Optional, Any
-from backend.connectors.llm.gemini import GeminiLLM
+from backend.connectors.llm.openrouter import OpenRouterLLM
+from backend.connectors.llm.llm_router import pick_model
 from backend.connectors.search.web_search import WebSearch
-from backend.connectors.code.code_executor import CodeExecutor
+# from backend.connectors.code.code_executor import CodeExecutor
 from backend.connectors.memory.memory_manager import MemoryManager
 from backend.connectors.files.file_manager import FileManager
 from backend.connectors.system.system_actions import SystemActions
+from backend.connectors.control.input_controller import InputController
 from backend.connectors.vision.vision_analyzer import VisionAnalyzer
 from backend.rag.rag_store import RAGStore
 from backend.config.settings import settings
@@ -14,23 +16,30 @@ from backend.config.settings import settings
 
 class Orchestrator:
     """
-    Advanced agentic orchestrator powered by Gemini 2.0 Flash.
+    Advanced agentic orchestrator powered by OpenRouter with Nemotron.
     Analyzes user intent, creates action plans, and coordinates module execution.
     """
 
     def __init__(self):
         """
         Initialize the orchestrator with all module connectors.
+        NO HARDCODED MODELS - All models loaded from settings.
         """
-        # Initialize LLM (Gemini by default)
-        self.llm = GeminiLLM()
+        # Initialize three specialized LLM instances from settings
+        self.llm_reasoning = OpenRouterLLM(model=settings.MODEL_REASONING)
+        self.llm_coding = OpenRouterLLM(model=settings.MODEL_CODING)
+        self.llm_vision = OpenRouterLLM(model=settings.MODEL_VISION)
+        
+        # Track current model info for logging
+        self.current_model_info = None
         
         # Initialize module connectors
         self.web_search = WebSearch()
-        self.code_executor = CodeExecutor()
+        # self.code_executor = CodeExecutor()
         self.memory_manager = MemoryManager()
         self.file_manager = FileManager()
         self.system_actions = SystemActions()
+        self.input_controller = InputController()
         self.vision_analyzer = VisionAnalyzer()
         self.rag = RAGStore()
         
@@ -48,15 +57,15 @@ class Orchestrator:
                 r"explique.*qui.*va.*pas.*écran|explain.*bug.*screen",
                 r"screenshot|capture d'écran|screen capture"
             ],
-            "code_execution": [
-                r"write.*code|create.*function|implement|debug",
-                r"fix.*bug|refactor|optimize.*code",
-                r"generate.*script|build.*application",
-                r"corrige.*code|repare.*code|fix.*code",
-                r"execute.*script|run.*code|execute.*code",
-                r"analyse.*code|analyze.*code|review.*code",
-                r"optimise|optimize|ameliore.*code|improve.*code"
-            ],
+            # "code_execution": [
+            #     r"write.*code|create.*function|implement|debug",
+            #     r"fix.*bug|refactor|optimize.*code",
+            #     r"generate.*script|build.*application",
+            #     r"corrige.*code|repare.*code|fix.*code",
+            #     r"execute.*script|run.*code|execute.*code",
+            #     r"analyse.*code|analyze.*code|review.*code",
+            #     r"optimise|optimize|ameliore.*code|improve.*code"
+            # ],
             "memory": [
                 r"remember|recall|what did|previous|history",
                 r"save.*information|store.*data|memorize",
@@ -64,7 +73,14 @@ class Orchestrator:
             ],
             "file_operation": [
                 r"read.*file|write.*file|create.*file|edit.*file",
-                r"open|save|delete.*file"
+                r"open|save|delete.*file",
+                r"move.*file|copy.*file|rename.*file",
+                r"trier|ranger|classer|sort|organize"
+            ],
+            "input_control": [
+                r"mouse|souris|click|clique|scroll|defile",
+                r"keyboard|clavier|type|ecris|press|appuie",
+                r"control.*mouse|control.*keyboard|prends.*controle"
             ],
             "system_action": [
                 r"open.*folder|open.*directory|launch.*program",
@@ -79,6 +95,10 @@ class Orchestrator:
                 r"add.*to.*rag|store.*document|save.*to.*knowledge",
                 r"remember.*this|add.*to.*memory"
             ],
+            "memory_cleanup": [
+                r"clean.*memory|forget.*project|delete.*dataset",
+                r"oublie.*projet|nettoie.*memoire|supprime.*dataset"
+            ],
             "conversation": [
                 r"hello|hi|bonjour|salut|hey",
                 r"thank|merci|thanks",
@@ -89,11 +109,11 @@ class Orchestrator:
         # Action routing map
         self.ACTION_MAP = {
             "search_web": self._action_search_web,
-            "code_execute": self._action_code_execute,
-            "code_analyze": self._action_code_analyze,
-            "code_explain": self._action_code_explain,
-            "code_optimize": self._action_code_optimize,
-            "code_debug": self._action_code_debug,
+            # "code_execute": self._action_code_execute,
+            # "code_analyze": self._action_code_analyze,
+            # "code_explain": self._action_code_explain,
+            # "code_optimize": self._action_code_optimize,
+            # "code_debug": self._action_code_debug,
             "system_open": self._action_system_open,
             "system_run": self._action_system_run,
             "system_list_processes": self._action_system_list_processes,
@@ -102,24 +122,36 @@ class Orchestrator:
             "file_write": self._action_file_write,
             "file_list": self._action_file_list,
             "file_delete": self._action_file_delete,
+            "file_move": self._action_file_move,
+            "file_copy": self._action_file_copy,
             "vision_analyze": self._action_vision_analyze,
             "rag_query": self._action_rag_query,
             "rag_add": self._action_rag_add,
+            "memory_cleanup": self._action_memory_cleanup,
             "memory_recall": self._action_memory_recall,
-            "memory_search": self._action_memory_search
+            "memory_search": self._action_memory_search,
+            "mouse_move": self._action_mouse_move,
+            "mouse_click": self._action_mouse_click,
+            "mouse_scroll": self._action_mouse_scroll,
+            "keyboard_type": self._action_keyboard_type,
+            "keyboard_press": self._action_keyboard_press
         }
         
         # Sensitive actions that require confirmation
         self.SENSITIVE_ACTIONS = {
             "system_open", "system_run", "system_kill",
-            "file_write", "file_delete",
-            "code_execute", "rag_add"
+            "file_write", "file_delete", "file_move", "file_copy",
+            # "code_execute", 
+            "rag_add", "memory_cleanup",
+            "mouse_move", "mouse_click", "mouse_scroll",
+            "keyboard_type", "keyboard_press"
         }
         
         # Safe actions that can be executed directly
         self.SAFE_ACTIONS = {
             "search_web", "conversation",
-            "rag_query", "code_analyze", "code_explain",
+            "rag_query", 
+            # "code_analyze", "code_explain",
             "memory_recall", "memory_search", "file_read", "file_list"
         }
 
@@ -127,6 +159,95 @@ class Orchestrator:
         """Log message if debug mode is enabled."""
         if settings.ORCHESTRATOR_DEBUG:
             print(message)
+    
+    def pick_model(self, task_type: str) -> OpenRouterLLM:
+        """
+        Pick the appropriate LLM based on task type.
+        
+        Args:
+            task_type: Type of task (coding, vision, reasoning, etc.)
+            
+        Returns:
+            OpenRouterLLM instance for the task
+        """
+        if task_type in ["code_execution", "code_analyze", "code_explain", "code_optimize", "code_debug", "coding"]:
+            return self.llm_coding
+        elif task_type in ["vision_analysis", "image_analysis", "screenshot_analysis", "vision"]:
+            return self.llm_vision
+        else:
+            # Default to reasoning for everything else
+            return self.llm_reasoning
+    
+    async def _inject_rag_context(self, messages: List[Dict[str, str]], prompt: str, session_id: str = "default") -> List[Dict[str, str]]:
+        """
+        Inject RAG context into messages before LLM call.
+        Queries both conversation memory AND RAG store.
+        
+        Args:
+            messages: Original messages list
+            prompt: Current user prompt for semantic search
+            session_id: Session ID for context retrieval
+            
+        Returns:
+            Messages with RAG context injected
+        """
+        context_parts = []
+        
+        # 1. Conversation History (Short-term)
+        try:
+            # Get recent conversation history from memory
+            context = self.memory_manager.get_context(session_id, max_messages=5)
+            
+            if context:
+                context_parts.append(f"=== RECENT CONVERSATION ===\n{context}")
+        except Exception as e:
+            self._log(f"[ORCH] Memory injection warning: {str(e)}")
+
+        # 2. RAG Context (Long-term / Knowledge)
+        try:
+            # Query multiple datasets based on priority
+            rag_context_parts = []
+            
+            # A. CORE MEMORY (Permanent: Identity, Rules, PC Structure)
+            core_results = await self.rag.query("agent_core", prompt, top_k=2)
+            if core_results:
+                core_text = "\n".join([f"- {r['content']}" for r in core_results])
+                rag_context_parts.append(f"--- CORE KNOWLEDGE (Permanent) ---\n{core_text}")
+            
+            # B. PROJECT MEMORY (Medium-term: Ongoing work)
+            # We search in all project datasets (starting with 'project_')
+            # For now, we just search a generic 'current_projects' dataset or infer from prompt
+            # Simplified: Search in 'projects' dataset
+            project_results = await self.rag.query("projects", prompt, top_k=2)
+            if project_results:
+                proj_text = "\n".join([f"- {r['content']} (Source: {r['filename']})" for r in project_results])
+                rag_context_parts.append(f"--- PROJECT CONTEXT (Ongoing) ---\n{proj_text}")
+                
+            # C. SCRATCHPAD (Ephemeral: Temporary info)
+            scratch_results = await self.rag.query("scratchpad", prompt, top_k=1)
+            if scratch_results:
+                scratch_text = "\n".join([f"- {r['content']}" for r in scratch_results])
+                rag_context_parts.append(f"--- TEMPORARY NOTES (Ephemeral) ---\n{scratch_text}")
+            
+            if rag_context_parts:
+                full_rag_text = "\n\n".join(rag_context_parts)
+                context_parts.append(f"=== KNOWLEDGE BASE (RAG) ===\n{full_rag_text}")
+            else:
+                self._log("[ORCH] RAG: No relevant context found")
+                
+        except Exception as e:
+            self._log(f"[ORCH] RAG injection warning: {str(e)}")
+        
+        if context_parts:
+            full_context = "\n\n".join(context_parts)
+            # Inject context as system message at the beginning
+            rag_message = {
+                "role": "system",
+                "content": f"CONTEXT INFORMATION:\n{full_context}"
+            }
+            return [rag_message] + messages
+        
+        return messages
 
     def _is_plan_sensitive(self, steps: List[Dict[str, Any]]) -> bool:
         """
@@ -155,25 +276,30 @@ class Orchestrator:
         prompt: str,
         context: Optional[str] = None,
         session_id: str = "default",
-        execution_mode: str = "auto"
+        execution_mode: str = "auto",
+        image_data: Optional[bytes] = None
     ) -> Dict[str, Any]:
         """
         Main orchestration method with execution modes and permission system.
+        Supports multimodal input (text + images).
         
         Args:
             prompt: User's input text
             context: Optional additional context
             session_id: Session ID for memory management
             execution_mode: Execution mode (auto, plan_only, step_by_step)
+            image_data: Optional image bytes for multimodal analysis
             
         Returns:
-            dict: Structured response with execution results and permissions
+            dict: Structured response with execution results, permissions, and llm_used
         """
         self._log(f"[ORCH] Nouveau prompt recu : {prompt}")
         self._log(f"[ORCH] Mode d'execution : {execution_mode}")
+        if image_data:
+            self._log(f"[ORCH] Mode multimodal active (image fournie)")
         
-        # Step 1: Analyze and create plan
-        plan = await self.think(prompt, context)
+        # Step 1: Analyze and create plan (with optional image)
+        plan = await self.think(prompt, context, image_data)
         
         intention = plan.get("intention", "fallback")
         confidence = plan.get("confidence", 0.0)
@@ -231,7 +357,9 @@ class Orchestrator:
             "response": response,
             "execution_results": execution_results,
             "requires_confirmation": requires_confirmation,
-            "execution_mode_used": execution_mode
+            "execution_mode_used": execution_mode,
+            "llm_used": plan.get("llm_used", "unknown"),
+            "llm_specialist": plan.get("llm_specialist", "unknown")
         }
 
     async def _execute_steps(
@@ -241,6 +369,7 @@ class Orchestrator:
     ) -> List[Dict[str, Any]]:
         """
         Execute a list of steps sequentially with logging.
+        Uses LLM Router for steps that require LLM calls.
         
         Args:
             steps: List of action steps to execute
@@ -258,6 +387,15 @@ class Orchestrator:
             
             self._log(f"[ORCH] Execution etape {i+1}/{len(steps)} : {action}")
             self._log(f"[ORCH] Parametres : {params}")
+            
+            # Detect if this step needs multimodal support
+            multimodal = "image_bytes" in params or "image_data" in params
+            
+            # Select model for this specific action if it involves LLM
+            if action in ["code_analyze", "code_explain", "code_optimize", "rag_query"]:
+                model_info = pick_model(action, multimodal=multimodal)
+                self._log(f"[ORCH] Modele pour action {action} : {model_info['model']}")
+                params["_model_info"] = model_info
             
             # Get action handler
             if action in self.ACTION_MAP:
@@ -297,19 +435,38 @@ class Orchestrator:
         
         return results
 
-    async def think(self, prompt: str, context: Optional[str] = None) -> Dict[str, Any]:
+    async def think(
+        self,
+        prompt: str,
+        context: Optional[str] = None,
+        image_data: Optional[bytes] = None
+    ) -> Dict[str, Any]:
         """
         Main orchestration method. Analyzes the prompt and creates an action plan.
+        Uses LLM Router to select the appropriate specialist model.
         
         Args:
             prompt: User's input text
             context: Optional additional context
+            image_data: Optional image bytes for multimodal analysis
             
         Returns:
-            dict: Structured response with intention, confidence, steps, and response
+            dict: Structured response with intention, confidence, steps, response, and llm_used
         """
         # Quick intent detection
         detected_intents = self._detect_intents(prompt)
+        
+        # Determine if multimodal is needed
+        multimodal = image_data is not None
+        
+        # Select appropriate model using router
+        # Use first detected intent or "fallback"
+        primary_intention = detected_intents[0] if detected_intents else "fallback"
+        model_info = pick_model(primary_intention, multimodal=multimodal)
+        
+        self.current_model_info = model_info
+        self._log(f"[ORCH] Modele selectionne : {model_info['model']} (specialiste: {model_info['specialist']})")
+        self._log(f"[ORCH] Raison : {model_info.get('reason', 'N/A')}")
         
         # Build orchestration prompt
         orchestration_prompt = self._build_orchestration_prompt(prompt, detected_intents)
@@ -318,15 +475,37 @@ class Orchestrator:
         if context:
             orchestration_prompt = f"{orchestration_prompt}\n\nAdditional Context:\n{context}"
         
-        # Get reasoning from LLM
+        # Get reasoning from LLM with selected model
         try:
-            reasoning_response = self.llm.ask(orchestration_prompt)
+            # Pick the appropriate LLM based on primary intention
+            llm = self.pick_model(primary_intention)
+            
+            # Prepare messages
+            messages = [{"role": "user", "content": orchestration_prompt}]
+            
+            # Inject RAG context before LLM call
+            messages = await self._inject_rag_context(messages, prompt)
+            
+            # Call LLM
+            if multimodal and image_data:
+                # For multimodal, use vision model directly
+                llm = self.llm_vision
+                reasoning_response = llm.ask_with_image(
+                    prompt=orchestration_prompt,
+                    image_bytes=image_data
+                )
+            else:
+                reasoning_response = llm.ask(messages)
             
             # Parse the response
             parsed_result = self._parse_reasoning_response(reasoning_response, detected_intents)
             
             # Store original prompt for memory management
             parsed_result["original_prompt"] = prompt
+            
+            # Add LLM info to result
+            parsed_result["llm_used"] = model_info["model"]
+            parsed_result["llm_specialist"] = model_info["specialist"]
             
             return parsed_result
         
@@ -337,7 +516,9 @@ class Orchestrator:
                 "steps": [],
                 "response": f"Orchestration error: {str(e)}",
                 "error": str(e),
-                "original_prompt": prompt
+                "original_prompt": prompt,
+                "llm_used": model_info.get("model", "unknown"),
+                "llm_specialist": model_info.get("specialist", "unknown")
             }
 
     def _detect_intents(self, prompt: str) -> List[str]:
@@ -363,7 +544,7 @@ class Orchestrator:
 
     def _build_orchestration_prompt(self, prompt: str, detected_intents: List[str]) -> str:
         """
-        Build the orchestration prompt for Gemini.
+        Build the orchestration prompt for the LLM.
         
         Args:
             prompt: User's input
@@ -382,10 +563,16 @@ Available modules and actions:
 - WEB_SEARCH: search_web(query, max_results)
 - CODE: code_execute(code), code_analyze(code), code_explain(code), code_optimize(code), code_debug(code, error)
 - SYSTEM: system_open(path), system_run(path, args), system_list_processes(), system_kill(name)
-- FILE: file_read(path), file_write(path, content), file_list(path), file_delete(path)
+- FILE: file_read(path), file_write(path, content), file_list(path), file_delete(path), file_move(src, dest), file_copy(src, dest)
+- INPUT: mouse_move(x, y), mouse_click(x, y, button), keyboard_type(text), keyboard_press(keys)
 - VISION: vision_analyze(image_bytes, prompt)
-- RAG: rag_query(dataset, question, top_k), rag_add(dataset, filename, content, metadata)
-- MEMORY: memory_recall(session_id, max_messages), memory_search(query, session_id)
+- RAG: rag_query(dataset, question, top_k), rag_add(dataset, filename, content, metadata), memory_cleanup(retention_days)
+
+IMPORTANT - MEMORY MANAGEMENT RULES:
+1. Use dataset='agent_core' for PERMANENT info (Identity, User Preferences, PC Structure, Security Rules). NEVER delete this.
+2. Use dataset='projects' for ONGOING work (Multi-day tasks, Project documentation).
+3. Use dataset='scratchpad' for EPHEMERAL info (One-off analysis, temporary notes).
+4. Use 'memory_cleanup(retention_days=1)' to clear old ephemeral data when asked to "forget" or "clean up".
 
 Your task:
 1. Determine the PRIMARY intention (web_search, code_execution, system_action, file_operation, vision_analysis, rag_query, rag_add, conversation, or fallback)
@@ -410,10 +597,10 @@ Be precise and actionable. Use exact action names from the list above."""
 
     def _parse_reasoning_response(self, response: str, detected_intents: List[str]) -> Dict[str, Any]:
         """
-        Parse Gemini's reasoning response into structured format.
+        Parse LLM's reasoning response into structured format.
         
         Args:
-            response: Raw response from Gemini
+            response: Raw response from LLM
             detected_intents: Pre-detected intents for fallback
             
         Returns:
@@ -465,25 +652,25 @@ Be precise and actionable. Use exact action names from the list above."""
         """Execute web search action."""
         return await self.web_search.search(query, max_results)
     
-    async def _action_code_execute(self, code: str, **kwargs) -> Dict[str, Any]:
-        """Execute code action."""
-        return await self.code_executor.execute(code)
+    # async def _action_code_execute(self, code: str, **kwargs) -> Dict[str, Any]:
+    #     """Execute code action."""
+    #     return await self.code_executor.execute(code)
     
-    async def _action_code_analyze(self, code: str, language: str = "python", **kwargs) -> Dict[str, Any]:
-        """Analyze code action."""
-        return await self.code_executor.analyze(code, language)
+    # async def _action_code_analyze(self, code: str, language: str = "python", **kwargs) -> Dict[str, Any]:
+    #     """Analyze code action."""
+    #     return await self.code_executor.analyze(code, language)
     
-    async def _action_code_explain(self, code: str, language: str = "python", **kwargs) -> Dict[str, Any]:
-        """Explain code action."""
-        return await self.code_executor.explain(code, language)
+    # async def _action_code_explain(self, code: str, language: str = "python", **kwargs) -> Dict[str, Any]:
+    #     """Explain code action."""
+    #     return await self.code_executor.explain(code, language)
     
-    async def _action_code_optimize(self, code: str, **kwargs) -> Dict[str, Any]:
-        """Optimize code action."""
-        return await self.code_executor.optimize(code)
+    # async def _action_code_optimize(self, code: str, **kwargs) -> Dict[str, Any]:
+    #     """Optimize code action."""
+    #     return await self.code_executor.optimize(code)
     
-    async def _action_code_debug(self, code: str, error: str = "", **kwargs) -> Dict[str, Any]:
-        """Debug code action."""
-        return await self.code_executor.debug(code, error)
+    # async def _action_code_debug(self, code: str, error: str = "", **kwargs) -> Dict[str, Any]:
+    #     """Debug code action."""
+    #     return await self.code_executor.debug(code, error)
     
     async def _action_system_open(self, path: str, **kwargs) -> Dict[str, Any]:
         """Open file or folder action."""
@@ -509,10 +696,29 @@ Be precise and actionable. Use exact action names from the list above."""
         """Write file action."""
         return self.file_manager.write(path, content, allow=True)
     
-    
+    async def _action_file_move(self, src: str, dest: str, **kwargs) -> Dict[str, Any]:
+        """Move file action."""
+        return self.file_manager.move(src, dest, allow=True)
+
+    async def _action_file_copy(self, src: str, dest: str, **kwargs) -> Dict[str, Any]:
+        """Copy file action."""
+        return self.file_manager.copy(src, dest, allow=True)
+
     async def _action_vision_analyze(self, image_bytes: bytes, prompt: str = "", **kwargs) -> Dict[str, Any]:
-        """Analyze image action."""
-        return await self.vision_analyzer.analyze_image(image_bytes, prompt)
+        """
+        Analyze image action using vision specialist.
+        Automatically uses multimodal model via router.
+        """
+        # Get vision model from router
+        model_info = pick_model("vision_analysis", multimodal=True)
+        self._log(f"[ORCH] Vision analysis avec modele : {model_info['model']}")
+        
+        # Use vision analyzer with selected model
+        return await self.vision_analyzer.analyze_image(
+            image_bytes,
+            prompt,
+            model=model_info["model"]
+        )
     async def _action_file_list(self, path: str = ".", **kwargs) -> Dict[str, Any]:
         """List directory action."""
         return self.file_manager.list_dir(path)
@@ -540,6 +746,30 @@ Be precise and actionable. Use exact action names from the list above."""
         """Search memory action."""
         results = self.memory_manager.search(query, session_id)
         return {"status": "success", "results": results}
+    
+    async def _action_memory_cleanup(self, retention_days: int = 1, **kwargs) -> Dict[str, Any]:
+        """Clean up old memory action."""
+        return self.rag.cleanup_memory(retention_days)
+
+    async def _action_mouse_move(self, x: int, y: int, duration: float = 0.5, **kwargs) -> Dict[str, Any]:
+        """Move mouse action."""
+        return self.input_controller.mouse_move(x, y, duration, allow=True)
+
+    async def _action_mouse_click(self, x: Optional[int] = None, y: Optional[int] = None, button: str = "left", clicks: int = 1, **kwargs) -> Dict[str, Any]:
+        """Click mouse action."""
+        return self.input_controller.mouse_click(x, y, button, clicks, allow=True)
+
+    async def _action_mouse_scroll(self, clicks: int, **kwargs) -> Dict[str, Any]:
+        """Scroll mouse action."""
+        return self.input_controller.mouse_scroll(clicks, allow=True)
+
+    async def _action_keyboard_type(self, text: str, interval: float = 0.05, **kwargs) -> Dict[str, Any]:
+        """Type text action."""
+        return self.input_controller.keyboard_type(text, interval, allow=True)
+
+    async def _action_keyboard_press(self, keys: List[str], **kwargs) -> Dict[str, Any]:
+        """Press keys action."""
+        return self.input_controller.keyboard_press(keys, allow=True)
 
     # ============================================================
     # PLAN EXECUTION - Sequential multi-step execution
@@ -650,7 +880,8 @@ Be precise and actionable. Use exact action names from the list above."""
             "web_search": ["search", "information_retrieval"],
             "code_execution": ["execute", "analyze", "explain", "optimize", "debug"],
             "system_action": ["open_path", "run_program", "list_processes", "kill_process"],
-            "file_operation": ["read", "write", "list", "delete"],
+            "file_operation": ["read", "write", "list", "delete", "move", "copy"],
+            "input_control": ["mouse_move", "mouse_click", "keyboard_type", "keyboard_press"],
             "vision": ["analyze_image", "analyze_screenshot", "extract_text"],
             "rag": ["query", "add_document"],
             "memory": ["recall", "search"],

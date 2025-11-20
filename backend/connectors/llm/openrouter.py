@@ -1,48 +1,41 @@
-"""
-OpenRouter LLM Connector
-OpenRouter API integration for multiple model access
-"""
-
 import requests
+from typing import List, Dict, Any
 from backend.config.settings import settings
 
 
 class OpenRouterLLM:
-    """OpenRouter connector for various models"""
 
     URL = "https://openrouter.ai/api/v1/chat/completions"
-    MODEL = "mistralai/mistral-large"  # Default model
 
-    def ask(self, prompt: str) -> str:
-        """
-        Send a prompt to OpenRouter and return the response
-        
-        Args:
-            prompt: The user prompt/question
-            
-        Returns:
-            The model's response text
-        """
+    def __init__(self, model: str):
+        if not model:
+            raise ValueError("Model must be specified")
+        self.model = model
+
+    def ask(self, messages: List[Dict[str, str]]) -> str:
+
         headers = {
             "Content-Type": "application/json",
-            "Authorization": f"Bearer {settings.OPENROUTER_API_KEY}"
+            "Authorization": f"Bearer {settings.OPENROUTER_API_KEY}",
+            "HTTP-Referer": "http://localhost",
+            "X-Title": "Local-Agent"
         }
 
-        body = {
-            "model": self.MODEL,
-            "messages": [{"role": "user", "content": prompt}]
+        payload = {
+            "model": self.model,
+            "messages": messages
         }
 
         try:
-            r = requests.post(self.URL, json=body, headers=headers, timeout=30)
+            r = requests.post(self.URL, json=payload, headers=headers, timeout=60)
 
             if r.status_code != 200:
                 return f"[ERREUR OPENROUTER] {r.status_code}: {r.text}"
 
-            response_data = r.json()
-            return response_data["choices"][0]["message"]["content"]
-            
-        except requests.exceptions.RequestException as e:
-            return f"[ERREUR OPENROUTER] Erreur de connexion: {str(e)}"
-        except (KeyError, IndexError) as e:
-            return f"[ERREUR OPENROUTER] Format de réponse invalide: {str(e)}"
+            return r.json()["choices"][0]["message"]["content"]
+
+        except Exception as e:
+            return f"[ERREUR OPENROUTER] {str(e)}"
+
+    def ask_simple(self, prompt: str) -> str:
+        return self.ask([{"role": "user", "content": prompt}])

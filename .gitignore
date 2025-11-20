@@ -1,0 +1,24 @@
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Local env
+.env
+backend/config/.env
+
+# Memory
+memory_data/
+rag/rag.db
+
+# Logs
+*.log
+*.tmp
+*.cache
+
+# VS Code
+.vscode/
+
+# Node
+node_modules/

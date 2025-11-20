@@ -6,6 +6,8 @@ import json
 from backend.config.settings import settings
 
 
+import shutil
+
 class FileManager:
     """
     Secure file manager for reading, writing, and managing files.
@@ -388,4 +390,107 @@ class FileManager:
                 "status": "error",
                 "error": str(e),
                 "path": file_path
+            }
+
+    def move(self, src_path: str, dest_path: str, allow: bool = False) -> Dict[str, Any]:
+        """
+        Move or rename a file or directory.
+        
+        Args:
+            src_path: Source path
+            dest_path: Destination path
+            allow: Must be True to allow operation
+            
+        Returns:
+            dict: Result with status
+        """
+        if not allow:
+            return {
+                "status": "denied",
+                "error": "Move operation requires allow=True",
+                "path": src_path
+            }
+            
+        try:
+            src = self._resolve_path(src_path)
+            dest = self._resolve_path(dest_path)
+            
+            if not src.exists():
+                return {
+                    "status": "error",
+                    "error": f"Source not found: {src_path}",
+                    "path": str(src)
+                }
+                
+            # Create parent directories for destination if they don't exist
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            
+            shutil.move(str(src), str(dest))
+            
+            return {
+                "status": "success",
+                "message": f"Moved {src.name} to {dest}",
+                "source": str(src),
+                "destination": str(dest)
+            }
+            
+        except Exception as e:
+            return {
+                "status": "error",
+                "error": str(e),
+                "source": src_path,
+                "destination": dest_path
+            }
+
+    def copy(self, src_path: str, dest_path: str, allow: bool = False) -> Dict[str, Any]:
+        """
+        Copy a file or directory.
+        
+        Args:
+            src_path: Source path
+            dest_path: Destination path
+            allow: Must be True to allow operation
+            
+        Returns:
+            dict: Result with status
+        """
+        if not allow:
+            return {
+                "status": "denied",
+                "error": "Copy operation requires allow=True",
+                "path": src_path
+            }
+            
+        try:
+            src = self._resolve_path(src_path)
+            dest = self._resolve_path(dest_path)
+            
+            if not src.exists():
+                return {
+                    "status": "error",
+                    "error": f"Source not found: {src_path}",
+                    "path": str(src)
+                }
+                
+            # Create parent directories for destination if they don't exist
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            
+            if src.is_dir():
+                shutil.copytree(str(src), str(dest), dirs_exist_ok=True)
+            else:
+                shutil.copy2(str(src), str(dest))
+            
+            return {
+                "status": "success",
+                "message": f"Copied {src.name} to {dest}",
+                "source": str(src),
+                "destination": str(dest)
+            }
+            
+        except Exception as e:
+            return {
+                "status": "error",
+                "error": str(e),
+                "source": src_path,
+                "destination": dest_path
             }

@@ -11,8 +11,9 @@ httpx>=0.25.0
 numpy>=1.24.0
 chromadb>=0.4.0
 
-# DuckDuckGo search
+# DuckDuckGo search et web scraping
 duckduckgo-search>=4.0.0
+beautifulsoup4>=4.12.0
 
 # Configuration
 pydantic>=2.0.0

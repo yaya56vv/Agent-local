@@ -6,21 +6,19 @@ from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     # --- API KEYS ---
-    GEMINI_API_KEY: str = ""
-    KIMI_API_KEY: str = ""
     OPENROUTER_API_KEY: str = ""
     SERPER_API_KEY: str = ""
     BRAVE_API_KEY: str = ""
     
+    # --- MODEL CONFIGURATION ---
+    MODEL_REASONING: str = "google/gemini-2.0-flash-exp:free"
+    MODEL_CODING: str = "google/gemini-2.0-flash-exp:free"
+    MODEL_VISION: str = "google/gemini-2.0-flash-exp:free"
+    MODEL_SPEECH: str | None = None
+    
     # --- LOCAL LLM ---
     LOCAL_LLM_BASE_URL: str = "http://127.0.0.1:11434"
     LOCAL_LLM_MODEL: str = "llama3.2"
-
-    # --- ENDPOINTS GEMINI ---
-    GEMINI_ENDPOINT: str = "https://generativelanguage.googleapis.com/v1beta/models"
-
-    # --- ENDPOINTS KIMI ---
-    KIMI_ENDPOINT: str = "https://api.moonshot.cn/v1"
 
     # --- ENDPOINTS OPENROUTER ---
     OPENROUTER_ENDPOINT: str = "https://openrouter.ai/api/v1/chat/completions"
@@ -35,6 +33,22 @@ class Settings(BaseSettings):
 
     # --- ORCHESTRATOR ---
     ORCHESTRATOR_DEBUG: bool = True
+
+    # --- LLM ROUTER (Mission 10) ---
+    # Modèles spécialisés optionnels
+    LLM_VISION_MODEL: str = "google/gemini-2.0-flash-exp:free"
+    LLM_CODE_MODEL: str = "google/gemini-2.0-flash-exp:free"
+    LLM_REASONING_MODEL: str = "google/gemini-2.0-flash-exp:free"
+    LLM_CONVERSATION_MODEL: str = "google/gemini-2.0-flash-exp:free"
+    LLM_RAG_MODEL: str = "google/gemini-2.0-flash-exp:free"
+    LLM_DEFAULT_MODEL: str = "google/gemini-2.0-flash-exp:free"
+    
+    # Activation des spécialistes (permet de désactiver certains)
+    LLM_ENABLE_VISION: bool = True
+    LLM_ENABLE_CODE: bool = True
+    LLM_ENABLE_REASONING: bool = True
+    LLM_ENABLE_CONVERSATION: bool = True
+    LLM_ENABLE_RAG: bool = True
 
     # --- GLOBAL CONFIG ---
     AGENT_NAME: str = "Agent Local"

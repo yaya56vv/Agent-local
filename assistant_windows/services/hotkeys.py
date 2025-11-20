@@ -46,32 +46,36 @@ class HotkeyManager(QObject):
         self.voice_service = voice_service
         
     def register_all_hotkeys(self):
-        """Register all global hotkeys"""
-        try:
-            # F1 - Show window (no capture)
-            keyboard.add_hotkey('f1', self._on_f1_pressed, suppress=True)
-            logger.info("Registered F1 hotkey")
-            
-            # F2 - Toggle voice listening (push-to-talk)
-            keyboard.add_hotkey('f2', self._on_f2_pressed, suppress=True)
-            logger.info("Registered F2 hotkey")
-            
-            # F8 - Show window + start auto capture
-            keyboard.add_hotkey('f8', self._on_f8_pressed, suppress=True)
-            logger.info("Registered F8 hotkey")
-            
-            # F9 - Stop auto capture
-            keyboard.add_hotkey('f9', self._on_f9_pressed, suppress=True)
-            logger.info("Registered F9 hotkey")
-            
-            # F10 - Single screenshot
-            keyboard.add_hotkey('f10', self._on_f10_pressed, suppress=True)
-            logger.info("Registered F10 hotkey")
-            
-            logger.info("All hotkeys registered successfully")
-            
-        except Exception as e:
-            logger.error(f"Error registering hotkeys: {e}", exc_info=True)
+        """Register all global hotkeys - F1/F2/F8/F9/F10 (pure F-keys, no modifiers)"""
+        hotkeys_registered = []
+        hotkeys_failed = []
+        
+        # Define hotkeys to register
+        hotkey_mappings = [
+            ('F1', self._on_f1_pressed, 'Show window (no capture)'),
+            ('F2', self._on_f2_pressed, 'Toggle voice listening (push-to-talk)'),
+            ('F8', self._on_f8_pressed, 'Start auto capture'),
+            ('F9', self._on_f9_pressed, 'Stop auto capture'),
+            ('F10', self._on_f10_pressed, 'Single screenshot')
+        ]
+        
+        # Register each hotkey individually with error handling
+        for key, callback, description in hotkey_mappings:
+            try:
+                keyboard.add_hotkey(key.lower(), callback, suppress=True)
+                hotkeys_registered.append(key)
+                logger.info(f"✓ Registered {key} hotkey - {description}")
+            except Exception as e:
+                hotkeys_failed.append(key)
+                print(f"[Hotkeys] Impossible d'enregistrer {key} – touche bloquée par le système.")
+                logger.error(f"Failed to register {key}: {e}")
+        
+        # Summary
+        if hotkeys_registered:
+            logger.info(f"Successfully registered {len(hotkeys_registered)}/{len(hotkey_mappings)} hotkeys: {', '.join(hotkeys_registered)}")
+        
+        if hotkeys_failed:
+            logger.warning(f"Failed to register {len(hotkeys_failed)} hotkeys: {', '.join(hotkeys_failed)}")
             
     def unregister_all_hotkeys(self):
         """Unregister all global hotkeys"""

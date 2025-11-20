@@ -3,30 +3,31 @@ import base64
 import asyncio
 from typing import Optional, Dict, Any
 import aiohttp
-
+from backend.config.settings import settings
 
 class VisionAnalyzer:
     """
-    Vision multimodal analyzer using Gemini 2.0 Flash.
+    Vision multimodal analyzer using OpenRouter (or compatible).
     Capable of analyzing images, extracting text, and providing detailed descriptions.
     """
 
     def __init__(self):
-        self.api_key = os.environ.get("GEMINI_API_KEY")
+        self.api_key = settings.OPENROUTER_API_KEY
         if not self.api_key:
-            raise ValueError("GEMINI_API_KEY environment variable is required")
+            raise ValueError("OPENROUTER_API_KEY environment variable is required")
         
-        self.base_url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent"
+        self.base_url = "https://openrouter.ai/api/v1/chat/completions"
         self.timeout = 60  # seconds
         self.max_retries = 3
 
-    async def analyze_image(self, image_bytes: bytes, prompt: str = "") -> dict:
+    async def analyze_image(self, image_bytes: bytes, prompt: str = "", model: str = None) -> dict:
         """
-        Analyze an image using Gemini multimodal.
+        Analyze an image using OpenRouter multimodal.
         
         Args:
             image_bytes: Raw image bytes (PNG, JPG, etc.)
             prompt: Optional prompt to guide the analysis
+            model: Optional model to use (defaults to settings.MODEL_VISION)
             
         Returns:
             dict: Structured JSON with:
@@ -43,28 +44,36 @@ class VisionAnalyzer:
         # Build analysis prompt
         analysis_prompt = self._build_analysis_prompt(prompt)
         
-        # Prepare API payload
+        # Use model from args or settings
+        model_to_use = model or settings.MODEL_VISION
+        
+        # Prepare API payload for OpenRouter (OpenAI compatible)
         payload = {
-            "contents": [{
-                "parts": [
-                    {"text": analysis_prompt},
-                    {
-                        "inline_data": {
-                            "mime_type": "image/jpeg",  # Gemini accepts jpeg/png
-                            "data": image_base64
+            "model": model_to_use,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": analysis_prompt},
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/jpeg;base64,{image_base64}"
+                            }
                         }
-                    }
-                ]
-            }],
-            "generationConfig": {
-                "temperature": 0.4,
-                "topK": 32,
-                "topP": 0.95,
-                "maxOutputTokens": 8192,
-            }
+                    ]
+                }
+            ],
+            "temperature": 0.4,
+            "max_tokens": 4096
         }
 
-        params = {"key": self.api_key}
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "HTTP-Referer": "http://localhost",
+            "X-Title": "Local-Agent",
+            "Content-Type": "application/json"
+        }
 
         # Execute with retries
         for attempt in range(self.max_retries):
@@ -73,7 +82,7 @@ class VisionAnalyzer:
                     async with session.post(
                         self.base_url,
                         json=payload,
-                        params=params,
+                        headers=headers,
                         timeout=aiohttp.ClientTimeout(total=self.timeout)
                     ) as response:
                         if response.status == 200:
@@ -85,21 +94,21 @@ class VisionAnalyzer:
                             if attempt < self.max_retries - 1:
                                 await asyncio.sleep(2 ** attempt)
                                 continue
-                            raise Exception(f"Gemini Vision API error (status {response.status}): {error_text}")
+                            raise Exception(f"Vision API error (status {response.status}): {error_text}")
             
             except asyncio.TimeoutError:
                 if attempt < self.max_retries - 1:
                     await asyncio.sleep(2 ** attempt)
                     continue
-                raise Exception(f"Gemini Vision API timeout after {self.timeout}s")
+                raise Exception(f"Vision API timeout after {self.timeout}s")
             
             except Exception as e:
                 if attempt < self.max_retries - 1:
                     await asyncio.sleep(2 ** attempt)
                     continue
-                raise Exception(f"Gemini Vision API error: {str(e)}")
+                raise Exception(f"Vision API error: {str(e)}")
 
-        raise Exception("Max retries exceeded for Gemini Vision API")
+        raise Exception("Max retries exceeded for Vision API")
 
     def _build_analysis_prompt(self, user_prompt: str = "") -> str:
         """
@@ -109,7 +118,7 @@ class VisionAnalyzer:
             user_prompt: Optional user-provided prompt
             
         Returns:
-            str: Formatted prompt for Gemini
+            str: Formatted prompt
         """
         base_prompt = """Analyze this image in detail and provide a structured response in JSON format.
 
@@ -143,36 +152,31 @@ Be precise, technical, and actionable in your analysis."""
 
     def _extract_text(self, response_data: dict) -> str:
         """
-        Extract text from Gemini API response.
+        Extract text from OpenRouter/OpenAI API response.
         
         Args:
-            response_data: The JSON response from Gemini API
+            response_data: The JSON response from API
             
         Returns:
             str: Extracted text content
         """
         try:
-            candidates = response_data.get("candidates", [])
-            if not candidates:
-                return "[ERROR] No candidates in Gemini response"
+            choices = response_data.get("choices", [])
+            if not choices:
+                return "[ERROR] No choices in response"
             
-            content = candidates[0].get("content", {})
-            parts = content.get("parts", [])
-            
-            if not parts:
-                return "[ERROR] No parts in Gemini response"
-            
-            return parts[0].get("text", "[ERROR] No text in response")
+            message = choices[0].get("message", {})
+            return message.get("content", "[ERROR] No content in response")
         
         except (KeyError, IndexError, TypeError) as e:
-            return f"[ERROR] Failed to parse Gemini response: {str(e)}"
+            return f"[ERROR] Failed to parse response: {str(e)}"
 
     def _parse_vision_response(self, raw_response: str) -> Dict[str, Any]:
         """
         Parse the vision analysis response into structured format.
         
         Args:
-            raw_response: Raw text response from Gemini
+            raw_response: Raw text response
             
         Returns:
             dict: Structured vision analysis result
