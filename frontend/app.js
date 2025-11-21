@@ -10,6 +10,20 @@ const MAX_BANNER_LOGS = 10;
 let sessionTimer = 0;
 let timerInterval = null;
 
+// État TODO List
+let todoList = [];
+let currentTodoId = 0;
+
+// État agent temps réel
+let agentState = 'inactive'; // 'active', 'idle', 'processing', 'error'
+let currentTool = 'Aucun';
+let currentAction = 'En attente';
+let currentLocation = '';
+let lastActivityTime = Date.now();
+let activityLog = []; // Historique des activités avec durées
+let activityTracker = null; // Timer pour le tracking continu
+let idleTimer = null; // Timer pour détecter l'inactivité
+
 // État du microphone et TTS
 let isRecording = false;
 let mediaRecorder = null;
@@ -20,6 +34,10 @@ let currentAudioElement = null;
 // Initialisation
 document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('session-id').textContent = sessionId;
+    
+    // Démarrer le tracking temps réel en premier
+    startRealTimeTracking();
+    
     addLog('info', 'Interface chargée');
     
     // Vérifier la santé du backend au démarrage
@@ -70,75 +88,424 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Initialiser l'explorateur de fichiers
     initFileExplorer();
+    
+    // Initialiser le drag & drop pour le contexte
+    setupContextDragDrop();
+    
+    // Lier le bouton d'attachement au file input
+    const attachButton = document.getElementById('attach-button');
+    const fileInput = document.getElementById('context-file-input');
+    if (attachButton && fileInput) {
+        fileInput.addEventListener('change', handleContextFiles);
+    }
 });
+
+// ============ CONTEXT FILE UPLOAD ============
+
+function attachFileToContext() {
+    const fileInput = document.getElementById('context-file-input');
+    if (fileInput) {
+        fileInput.click();
+    }
+}
+
+async function handleContextFiles(event) {
+    const files = event.target.files;
+    if (!files || files.length === 0) return;
+    
+    addLog('info', `${files.length} fichier(s) sélectionné(s) pour le contexte`);
+    
+    for (const file of files) {
+        await addFileToContext(file);
+    }
+    
+    // Reset input
+    event.target.value = '';
+}
+
+async function addFileToContext(file) {
+    addLog('info', `Lecture du fichier: ${file.name}`);
+    
+    try {
+        const text = await file.text();
+        
+        // Ajouter au contexte de la conversation
+        const contextMessage = `📎 Fichier ajouté au contexte: ${file.name}\n\n${text.substring(0, 500)}${text.length > 500 ? '...' : ''}`;
+        appendChat('system', contextMessage);
+        
+        // Optionnel: Ajouter au RAG pour persistance
+        if (confirm(`Voulez-vous également ajouter "${file.name}" à la base de connaissances RAG ?`)) {
+            await addToRAGFromFile(file.name, text);
+        }
+        
+        addLog('success', `Fichier "${file.name}" ajouté au contexte`);
+        
+    } catch (error) {
+        addLog('error', `Erreur lecture fichier "${file.name}": ${error.message}`);
+        appendChat('error', `Impossible de lire le fichier: ${error.message}`);
+    }
+}
+
+async function addToRAGFromFile(filename, content) {
+    try {
+        const response = await fetch(`${API_BASE_URL}/rag/add`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                dataset: 'scratchpad',
+                filename: filename,
+                content: content
+            })
+        });
+        
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        
+        addLog('success', `Fichier "${filename}" ajouté au RAG`);
+        
+        // Rafraîchir l'explorateur RAG
+        await loadRAGDocuments();
+        
+    } catch (error) {
+        addLog('error', `Erreur ajout RAG: ${error.message}`);
+    }
+}
+
+function setupContextDragDrop() {
+    const chatWindow = document.getElementById('chat-window');
+    const overlay = document.getElementById('context-drop-overlay');
+    
+    if (!chatWindow || !overlay) return;
+    
+    // Prevent default drag behaviors
+    ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+        chatWindow.addEventListener(eventName, preventDefaults, false);
+    });
+    
+    function preventDefaults(e) {
+        e.preventDefault();
+        e.stopPropagation();
+    }
+    
+    // Highlight drop zone
+    ['dragenter', 'dragover'].forEach(eventName => {
+        chatWindow.addEventListener(eventName, () => {
+            overlay.classList.remove('hidden');
+        }, false);
+    });
+    
+    ['dragleave', 'drop'].forEach(eventName => {
+        chatWindow.addEventListener(eventName, () => {
+            overlay.classList.add('hidden');
+        }, false);
+    });
+    
+    // Handle dropped files
+    chatWindow.addEventListener('drop', async (e) => {
+        const files = e.dataTransfer.files;
+        if (files.length > 0) {
+            addLog('info', `${files.length} fichier(s) déposé(s)`);
+            for (const file of files) {
+                await addFileToContext(file);
+            }
+        }
+    }, false);
+}
 
 // ============ EXPLORATEUR DE FICHIERS ============
 
 async function initFileExplorer() {
-    // Charger la racine par défaut
-    await loadDirectory('.');
+    // Charger les datasets disponibles
+    await loadRAGDatasets();
+
+    // Charger les documents RAG
+    await loadRAGDocuments();
+    
+    // Gérer le changement de dataset
+    const select = document.getElementById('rag-dataset-select');
+    const newInput = document.getElementById('rag-new-dataset-input');
+    
+    if (select && newInput) {
+        select.onchange = () => {
+            if (select.value === 'new') {
+                newInput.classList.remove('hidden');
+                newInput.focus();
+            } else {
+                newInput.classList.add('hidden');
+            }
+        };
+    }
+
+    // Ajouter le gestionnaire de clic sur la drop zone
+    const dropZone = document.getElementById('rag-drop-zone');
+    if (dropZone) {
+        dropZone.onclick = () => {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = '.txt,.md,.pdf,.docx,.py,.js,.html,.css,.json';
+            input.multiple = true;
+            input.onchange = async (e) => {
+                const files = e.target.files;
+                if (files && files.length > 0) {
+                    for (const file of files) {
+                        await uploadFileToRAG(file);
+                    }
+                }
+            };
+            input.click();
+        };
+    }
 }
 
-async function loadDirectory(path) {
+async function loadRAGDatasets() {
+    const select = document.getElementById('rag-dataset-select');
+    if (!select) return;
+
+    try {
+        const response = await fetch(`${API_BASE_URL}/rag/datasets`, {
+            method: 'GET',
+            headers: { 'Content-Type': 'application/json' }
+        });
+
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const datasets = await response.json();
+
+        // Sauvegarder la sélection actuelle
+        const currentSelection = select.value;
+
+        // Reconstruire le select
+        select.innerHTML = '<option value="new">+ Nouveau dataset...</option>';
+        
+        // Ajouter les datasets existants
+        datasets.forEach(ds => {
+            const option = document.createElement('option');
+            option.value = ds;
+            option.textContent = `Dataset: ${ds}`;
+            select.appendChild(option);
+        });
+        
+        // Restaurer la sélection ou mettre par défaut
+        if (datasets.includes(currentSelection)) {
+            select.value = currentSelection;
+        } else if (datasets.includes('default')) {
+            select.value = 'default';
+        } else if (datasets.length > 0) {
+            select.value = datasets[0];
+        }
+
+    } catch (error) {
+        addLog('error', `Erreur chargement datasets: ${error.message}`);
+    }
+}
+
+async function uploadFileToRAG(file) {
+    addLog('info', `Upload vers RAG: ${file.name}`);
+    
+    // Déterminer le dataset cible
+    const select = document.getElementById('rag-dataset-select');
+    const newInput = document.getElementById('rag-new-dataset-input');
+    let dataset = 'default';
+    
+    if (select) {
+        if (select.value === 'new' && newInput) {
+            dataset = newInput.value.trim() || 'default';
+        } else {
+            dataset = select.value;
+        }
+    }
+
+    try {
+        const text = await file.text();
+        
+        const response = await fetch(`${API_BASE_URL}/rag/documents/add`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                content: text,
+                metadata: {
+                    filename: file.name,
+                    dataset: dataset,
+                    uploaded_at: new Date().toISOString()
+                }
+            })
+        });
+        
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        
+        addLog('success', `Fichier "${file.name}" ajouté au dataset "${dataset}"`);
+        
+        // Rafraîchir l'interface
+        await loadRAGDatasets();
+        await loadRAGDocuments();
+        
+        // Reset input si nouveau dataset créé
+        if (select.value === 'new' && newInput) {
+            newInput.value = '';
+            // Sélectionner le nouveau dataset
+            select.value = dataset;
+            newInput.classList.add('hidden');
+        }
+        
+    } catch (error) {
+        addLog('error', `Erreur upload RAG: ${error.message}`);
+    }
+}
+
+async function loadRAGDocuments() {
     const explorerList = document.getElementById('file-explorer');
     if (!explorerList) return;
 
     // Afficher loading
-    explorerList.innerHTML = '<li class="loading"><i class="fas fa-spinner fa-spin"></i> Chargement...</li>';
+    explorerList.innerHTML = '<li class="loading"><i class="fas fa-spinner fa-spin"></i> Chargement RAG...</li>';
 
     try {
-        const response = await fetch(`${API_BASE_URL}/files/list`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ dir_path: path })
+        const response = await fetch(`${API_BASE_URL}/rag/documents`, {
+            method: 'GET',
+            headers: { 'Content-Type': 'application/json' }
         });
 
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const data = await response.json();
+        const documents = await response.json();
 
-        if (data.status === 'error') throw new Error(data.error);
-
-        renderFileTree(data.items, path);
+        renderRAGTree(documents);
 
     } catch (error) {
         explorerList.innerHTML = `<li class="error"><i class="fas fa-exclamation-triangle"></i> Erreur: ${error.message}</li>`;
-        addLog('error', `Explorateur: ${error.message}`);
+        addLog('error', `Explorateur RAG: ${error.message}`);
     }
 }
 
-function renderFileTree(items, currentPath) {
+function renderRAGTree(documents) {
     const explorerList = document.getElementById('file-explorer');
     explorerList.innerHTML = '';
 
-    // Bouton retour si pas à la racine
-    if (currentPath !== '.' && currentPath !== './') {
-        const parentPath = currentPath.split('/').slice(0, -1).join('/') || '.';
-        const backItem = document.createElement('li');
-        backItem.innerHTML = '<i class="fas fa-level-up-alt"></i> ..';
-        backItem.onclick = () => loadDirectory(parentPath);
-        explorerList.appendChild(backItem);
+    if (documents.length === 0) {
+        explorerList.innerHTML = '<li class="empty">Aucun document indexé</li>';
+        return;
     }
 
-    // Trier: Dossiers d'abord, puis fichiers
-    items.sort((a, b) => {
-        if (a.is_dir === b.is_dir) return a.name.localeCompare(b.name);
-        return a.is_dir ? -1 : 1;
+    // Organiser les documents par dataset
+    const datasetMap = {};
+    documents.forEach(doc => {
+        const dataset = doc.metadata?.dataset || 'default';
+        if (!datasetMap[dataset]) {
+            datasetMap[dataset] = [];
+        }
+        datasetMap[dataset].push(doc);
     });
 
-    items.forEach(item => {
-        const li = document.createElement('li');
-        const iconClass = item.is_dir ? 'fa-folder' : getFileIcon(item.name);
+    // Créer l'arborescence
+    Object.keys(datasetMap).sort().forEach(dataset => {
+        // Créer le dossier dataset
+        const folderLi = document.createElement('li');
+        folderLi.className = 'folder-item';
         
-        li.innerHTML = `<i class="fas ${iconClass}"></i> ${item.name}`;
+        const folderHeader = document.createElement('div');
+        folderHeader.className = 'folder-header';
+        folderHeader.innerHTML = `
+            <i class="fas fa-folder folder-icon"></i>
+            <span class="folder-name">${dataset}</span>
+            <span class="folder-count">(${datasetMap[dataset].length})</span>
+        `;
         
-        if (item.is_dir) {
-            li.onclick = () => loadDirectory(item.path);
-        } else {
-            li.onclick = () => openFile(item.path);
-        }
+        // Toggle pour déplier/replier
+        folderHeader.onclick = (e) => {
+            e.stopPropagation();
+            folderLi.classList.toggle('expanded');
+            const icon = folderHeader.querySelector('.folder-icon');
+            if (folderLi.classList.contains('expanded')) {
+                icon.classList.remove('fa-folder');
+                icon.classList.add('fa-folder-open');
+            } else {
+                icon.classList.remove('fa-folder-open');
+                icon.classList.add('fa-folder');
+            }
+        };
         
-        explorerList.appendChild(li);
+        folderLi.appendChild(folderHeader);
+        
+        // Créer la liste des fichiers
+        const filesList = document.createElement('ul');
+        filesList.className = 'files-list';
+        
+        datasetMap[dataset].forEach(doc => {
+            const fileLi = document.createElement('li');
+            fileLi.className = 'file-item';
+            
+            const filename = doc.metadata?.filename || doc.id.substring(0, 20) + '...';
+            const iconClass = getFileIcon(filename);
+            
+            fileLi.innerHTML = `
+                <i class="fas ${iconClass} file-icon"></i>
+                <span class="file-name">${filename}</span>
+            `;
+            
+            fileLi.title = `Double-clic pour voir les détails\nID: ${doc.id}`;
+            
+            // Simple clic : sélection
+            fileLi.onclick = (e) => {
+                e.stopPropagation();
+                document.querySelectorAll('.file-item').forEach(f => f.classList.remove('selected'));
+                fileLi.classList.add('selected');
+            };
+            
+            // Double-clic : afficher les détails
+            fileLi.ondblclick = (e) => {
+                e.stopPropagation();
+                showDocumentDetails(doc);
+            };
+            
+            filesList.appendChild(fileLi);
+        });
+        
+        folderLi.appendChild(filesList);
+        explorerList.appendChild(folderLi);
     });
+    
+    addLog('success', `${documents.length} document(s) chargé(s) dans ${Object.keys(datasetMap).length} dataset(s)`);
+}
+
+function showDocumentDetails(doc) {
+    addLog('info', `Détails document: ${doc.id}`);
+    
+    // Basculer vers la vue fichier
+    const chatContainer = document.querySelector('.chat-container');
+    
+    // Créer ou récupérer le conteneur de fichier
+    let fileViewer = document.getElementById('file-viewer');
+    if (!fileViewer) {
+        fileViewer = document.createElement('div');
+        fileViewer.id = 'file-viewer';
+        fileViewer.className = 'file-viewer hidden';
+        
+        // Header du viewer
+        const header = document.createElement('div');
+        header.className = 'file-viewer-header';
+        header.innerHTML = `
+            <span id="file-viewer-filename">filename.txt</span>
+            <button class="btn-close-file" onclick="closeFileViewer()">
+                <i class="fas fa-times"></i> Fermer
+            </button>
+        `;
+        
+        // Contenu du viewer
+        const content = document.createElement('pre');
+        content.id = 'file-viewer-content';
+        
+        fileViewer.appendChild(header);
+        fileViewer.appendChild(content);
+        
+        // Insérer après le chat
+        chatContainer.parentNode.insertBefore(fileViewer, chatContainer.nextSibling);
+    }
+
+    // Afficher le contenu
+    const filename = doc.metadata && doc.metadata.filename ? doc.metadata.filename : doc.id;
+    document.getElementById('file-viewer-filename').textContent = filename;
+    document.getElementById('file-viewer-content').textContent = doc.content;
+    
+    // Masquer chat, afficher viewer
+    chatContainer.classList.add('hidden');
+    fileViewer.classList.remove('hidden');
 }
 
 function getFileIcon(filename) {
@@ -513,6 +880,9 @@ async function sendMessage() {
         return;
     }
 
+    // Mettre à jour l'état pour l'envoi
+    updateAgentState('Chat', 'Envoi message', 'conversation', 'processing');
+
     // Afficher message utilisateur
     appendChat('user', message);
     input.value = '';
@@ -548,6 +918,8 @@ async function sendMessage() {
         const reply = data.response || JSON.stringify(data);
         appendChat('agent', reply);
 
+        // Mettre à jour l'état pour la réponse reçue
+        updateAgentState('Agent', 'Réponse générée', 'orchestrator', 'active');
         addLog('success', 'Réponse reçue de l\'agent');
         updateBackendStatus('connected');
         
@@ -661,6 +1033,8 @@ async function askRAG() {
         return;
     }
 
+    // Mettre à jour l'état pour la requête RAG
+    updateAgentState('RAG', 'Requête base de connaissances', dataset, 'processing');
     addLog('info', `RAG: Question sur "${dataset}"`);
 
     // Afficher loading
@@ -903,11 +1277,14 @@ function addLog(level, message) {
         case 'info': levelIcon = 'ℹ'; break;
     }
 
-    // 1. Update Timeline (New Feature)
-    updateTimeline(level, message, timestamp);
+    // 1. Détecter l'état de l'agent à partir du log
+    detectStateFromLog(message, level);
 
-    // 2. Update Status Card (New Feature)
-    updateStatusCard(level, message);
+    // 2. Update Timeline (Nouvelle implémentation temps réel)
+    renderTimeline();
+
+    // 3. Update Status Card (Enhanced)
+    updateStatusCardEnhanced(level, message);
 
     // Add to recent logs array for banner
     const logData = {
@@ -982,61 +1359,322 @@ function updateLogBanner() {
     logsContainer.scrollLeft = logsContainer.scrollWidth;
 }
 
-// ============ DASHBOARD FEATURES ============
+// ============ TIMELINE TEMPS RÉEL AVANCÉE ============
 
-function updateTimeline(level, message, timestamp) {
-    const track = document.getElementById('timeline-track');
-    if (!track) return;
-
-    const node = document.createElement('div');
-    node.className = `timeline-node ${level === 'error' ? 'error' : ''}`;
+function startRealTimeTracking() {
+    // Démarrer le tracking continu de l'agent
+    if (activityTracker) clearInterval(activityTracker);
     
-    // Determine icon based on message content (simple heuristic)
-    let icon = '⚡';
-    if (message.includes('RAG')) icon = '📚';
-    if (message.includes('Message')) icon = '💬';
-    if (message.includes('Enregistrement')) icon = '🎤';
-    if (message.includes('TTS')) icon = '🔊';
-    if (message.includes('Arrêt')) icon = '🛑';
+    activityTracker = setInterval(() => {
+        updateAgentState();
+        renderTimeline();
+    }, 1000); // Mise à jour chaque seconde
 
-    node.innerHTML = `
-        <span class="time">${timestamp}</span>
-        <span class="icon">${icon}</span>
-        <span class="label">${message.substring(0, 20)}${message.length > 20 ? '...' : ''}</span>
-    `;
+    // Démarrer la détection d'inactivité
+    startIdleDetection();
+    
+    // État initial
+    updateAgentState('initialisation', 'Interface', 'frontend', 'Chargement initial');
+}
 
-    // Add to start
-    track.insertBefore(node, track.firstChild);
-
-    // Highlight first one
-    const nodes = track.querySelectorAll('.timeline-node');
-    nodes.forEach(n => n.classList.remove('active'));
-    node.classList.add('active');
-
-    // Limit nodes
-    if (nodes.length > 20) {
-        track.removeChild(track.lastChild);
+function updateAgentState(tool = null, location = null, action = null, status = null) {
+    const now = Date.now();
+    
+    // Si des paramètres sont fournis, mettre à jour l'état
+    if (tool) {
+        currentTool = tool;
+        currentLocation = location || '';
+        currentAction = action || 'Activité en cours';
+        agentState = status || 'active';
+        lastActivityTime = now;
+        
+        // Ajouter à l'historique
+        addToActivityLog(tool, currentAction, currentLocation, now);
+    }
+    
+    // Détecter l'inactivité (pas d'activité depuis 30 secondes)
+    const idleTime = now - lastActivityTime;
+    if (idleTime > 30000 && agentState !== 'idle') {
+        agentState = 'idle';
+        currentTool = 'Aucun';
+        currentAction = 'En attente';
+        currentLocation = 'aucun';
+    }
+    
+    // Détecter un bug prolongé (plus de 2 minutes sans activité utile)
+    if (idleTime > 120000) {
+        agentState = 'error';
+        currentAction = 'Possiblement bloqué';
     }
 }
 
-function updateStatusCard(level, message) {
+function addToActivityLog(tool, action, location, timestamp) {
+    // Éviter les doublons consécutifs
+    const lastEntry = activityLog[activityLog.length - 1];
+    if (lastEntry && lastEntry.tool === tool && lastEntry.action === action && lastEntry.location === location) {
+        return;
+    }
+    
+    // Calculer la durée de l'activité précédente
+    if (lastEntry) {
+        lastEntry.duration = timestamp - lastEntry.startTime;
+    }
+    
+    // Ajouter la nouvelle entrée
+    activityLog.push({
+        tool,
+        action,
+        location,
+        startTime: timestamp,
+        duration: 0 // Sera calculé à la prochaine entrée
+    });
+    
+    // Limiter l'historique à 20 entrées
+    if (activityLog.length > 20) {
+        activityLog.shift();
+    }
+}
+
+function startIdleDetection() {
+    if (idleTimer) clearTimeout(idleTimer);
+    
+    idleTimer = setTimeout(() => {
+        if (agentState === 'active' && Date.now() - lastActivityTime > 45000) {
+            updateAgentState('Système', 'temps réel', 'Surveillance inactive', 'idle');
+            renderTimeline();
+        }
+    }, 50000); // Vérification toutes les 50 secondes
+}
+
+function renderTimeline() {
+    const track = document.getElementById('timeline-track');
+    if (!track) return;
+
+    track.innerHTML = ''; // Vider complètement
+    
+    const now = Date.now();
+    const recentActivities = getRecentActivities(now);
+    
+    // Créer la timeline continue
+    recentActivities.forEach((activity, index) => {
+        const node = createTimelineNode(activity, index === recentActivities.length - 1, now);
+        track.appendChild(node);
+    });
+    
+    // Auto-scroll pour montrer les derniers éléments
+    track.scrollLeft = track.scrollWidth;
+}
+
+function getRecentActivities(now) {
+    const activities = [];
+    const lookbackTime = 60000; // 1 minute de lookback
+    
+    // Ajouter l'activité actuelle
+    const currentActivity = {
+        tool: currentTool,
+        action: currentAction,
+        location: currentLocation,
+        startTime: Math.max(lastActivityTime, now - 5000), // Au moins 5 secondes
+        duration: 0,
+        isActive: true
+    };
+    activities.push(currentActivity);
+    
+    // Ajouter les activités récentes de l'historique
+    const recentHistory = activityLog.filter(activity => 
+        now - activity.startTime < lookbackTime && activity.duration > 2000 // Au moins 2 secondes
+    );
+    
+    // Fusionner et trier par temps
+    activities.push(...recentHistory);
+    activities.sort((a, b) => b.startTime - a.startTime);
+    
+    // Limiter à 10 activités max
+    return activities.slice(0, 10);
+}
+
+function createTimelineNode(activity, isActive, now) {
+    const node = document.createElement('div');
+    const isIdle = activity.tool === 'Aucun';
+    const hasError = agentState === 'error' && isActive;
+    const duration = activity.duration || (now - activity.startTime);
+    
+    node.className = `timeline-node ${isActive ? 'active' : ''} ${hasError ? 'error' : ''}`;
+    
+    // Icône selon l'outil
+    const icon = getToolIcon(activity.tool);
+    const timeDisplay = formatDuration(duration);
+    
+    node.innerHTML = `
+        <div class="timeline-node-header">
+            <div class="timeline-node-icon ${isIdle ? 'idle' : ''}">${icon}</div>
+            <div class="timeline-node-tool">${activity.tool}</div>
+        </div>
+        <div class="timeline-node-action">${activity.action}</div>
+        <div class="timeline-node-location">${activity.location}</div>
+        <div class="timeline-node-footer">
+            <div class="timeline-node-duration">${timeDisplay}</div>
+            <div class="timeline-node-time">${new Date(activity.startTime).toLocaleTimeString('fr-FR', { hour12: false })}</div>
+        </div>
+    `;
+    
+    return node;
+}
+
+function getToolIcon(tool) {
+    const icons = {
+        'Chat': '💬',
+        'Web Search': '🌐',
+        'RAG': '📚',
+        'Fichiers': '📁',
+        'Audio': '🎤',
+        'TTS': '🔊',
+        'Agent': '🤖',
+        'Backend': '💚',
+        'Interface': '🖥️',
+        'Système': '⚙️',
+        'Aucun': '⏳',
+        'Erreur': '❌',
+        'Vision': '👁️',
+        'Contrôle PC': '🖱️',
+        'MouseController': '🖱️'
+    };
+    return icons[tool] || '⚡';
+}
+
+function formatDuration(milliseconds) {
+    const seconds = Math.floor(milliseconds / 1000);
+    const minutes = Math.floor(seconds / 60);
+    
+    if (minutes > 0) {
+        return `${minutes}m${seconds % 60}s`;
+    } else {
+        return `${seconds}s`;
+    }
+}
+
+// Fonction pour détecter les changements d'état à partir des logs
+function detectStateFromLog(message, level) {
+    let tool = currentTool;
+    let action = currentAction;
+    let location = currentLocation;
+    let status = agentState;
+    
+    // Détection intelligente basée sur le message
+    if (message.includes('Backend opérationnel') || message.includes('Interface chargée')) {
+        tool = 'Système';
+        action = 'Initialisation';
+        location = 'système';
+        status = 'active';
+    }
+    else if (message.includes('search') || message.includes('recherche')) {
+        tool = 'Web Search';
+        action = 'Recherche';
+        const match = message.match(/["'](.+?)["']/);
+        location = match ? match[1] : 'web';
+        status = 'processing';
+    }
+    else if (message.includes('RAG')) {
+        tool = 'RAG';
+        if (message.includes('Ajout') || message.includes('ajouté')) {
+            action = 'Ajout document';
+        } else if (message.includes('Question') || message.includes('query')) {
+            action = 'Requête';
+        }
+        location = 'base de connaissances';
+        status = 'processing';
+    }
+    else if (message.includes('fichier') || message.includes('Ouverture')) {
+        tool = 'Fichiers';
+        action = 'Lecture fichier';
+        const match = message.match(/:\s*(.+?)$/);
+        location = match ? match[1] : 'système';
+        status = 'processing';
+    }
+    else if (message.includes('Message envoyé')) {
+        tool = 'Chat';
+        action = 'Envoi message';
+        location = 'conversation';
+        status = 'processing';
+    }
+    else if (message.includes('Réponse reçue')) {
+        tool = 'Agent';
+        action = 'Génération réponse';
+        location = 'orchestrator';
+        status = 'active';
+    }
+    else if (message.includes('Micro') || message.includes('🎤')) {
+        tool = 'Audio';
+        action = message.includes('ON') ? 'Écoute vocale' : 'Audio inactif';
+        location = 'microphone';
+        status = 'active';
+    }
+    else if (level === 'error') {
+        tool = 'Erreur';
+        action = message.substring(0, 30);
+        location = 'système';
+        status = 'error';
+    }
+    
+    updateAgentState(tool, location, action, status);
+}
+
+function updateStatusCardEnhanced(level, message) {
     const statusText = document.getElementById('agent-status-text');
     const detailText = document.getElementById('current-action-detail');
     
-    if (statusText && detailText) {
-        if (level === 'error') {
-            statusText.innerHTML = '<span class="status-dot" style="background:red; box-shadow:0 0 8px red;"></span> Erreur';
-            statusText.style.color = '#ef4444';
-        } else if (level === 'waiting') {
-             statusText.innerHTML = '<span class="status-dot" style="background:orange; box-shadow:0 0 8px orange;"></span> Occupé';
-             statusText.style.color = '#f59e0b';
-        } else {
-            statusText.innerHTML = '<span class="status-dot"></span> Prêt';
-            statusText.style.color = '#10b981';
-        }
-        
-        detailText.textContent = message;
+    if (!statusText || !detailText) return;
+
+    // Utiliser l'état intelligent de l'agent
+    let statusDisplay = '';
+    let statusColor = '';
+    let statusIcon = '';
+    
+    switch (agentState) {
+        case 'active':
+            statusDisplay = 'Actif';
+            statusColor = '#10b981';
+            statusIcon = '🟢';
+            break;
+        case 'processing':
+            statusDisplay = 'Traitement';
+            statusColor = '#f59e0b';
+            statusIcon = '🟡';
+            break;
+        case 'idle':
+            statusDisplay = 'En attente';
+            statusColor = '#6b7280';
+            statusIcon = '⏳';
+            break;
+        case 'error':
+            statusDisplay = 'Erreur';
+            statusColor = '#ef4444';
+            statusIcon = '🔴';
+            break;
+        default:
+            statusDisplay = 'Inconnu';
+            statusColor = '#9ca3af';
+            statusIcon = '⚫';
     }
+    
+    statusText.innerHTML = `
+        <span class="status-dot" style="background:${statusColor}; box-shadow:0 0 8px ${statusColor};"></span> 
+        ${statusDisplay}
+    `;
+    statusText.style.color = statusColor;
+    
+    // Afficher l'outil actuel et l'action
+    let enhancedMessage = `${currentTool}: ${currentAction}`;
+    if (currentLocation && currentLocation !== 'aucun') {
+        enhancedMessage += ` (${currentLocation})`;
+    }
+    
+    // Ajouter le message original pour le contexte
+    if (message && !message.includes(currentAction)) {
+        enhancedMessage += ` - ${message}`;
+    }
+    
+    detailText.textContent = enhancedMessage;
 }
 
 function startSessionTimer() {
@@ -1190,3 +1828,248 @@ function setupDraggableInterface() {
         document.onmousemove = null;
     }
 }
+
+// ============ TODO LIST / SÉQUENCES D'ACTIONS ============
+
+function validateTodoSequence() {
+    /**
+     * Valide et crée une séquence TODO à partir du message utilisateur
+     */
+    const input = document.getElementById('user-message');
+    const message = input.value.trim();
+    
+    if (!message) {
+        addLog('warning', 'Aucun message à valider comme TODO');
+        return;
+    }
+    
+    // Détecter si le message contient plusieurs étapes
+    const steps = detectStepsInMessage(message);
+    
+    if (steps.length === 0) {
+        // Message simple, créer un seul TODO
+        addTodo(message, 'Action unique');
+    } else {
+        // Message avec plusieurs étapes
+        steps.forEach((step, index) => {
+            addTodo(step.title, step.description, index === 0 ? 'in-progress' : 'pending');
+        });
+    }
+    
+    // Vider l'input
+    input.value = '';
+    
+    addLog('success', `Séquence TODO créée avec ${steps.length || 1} étape(s)`);
+    appendChat('system', `✅ Séquence d'actions créée avec ${steps.length || 1} étape(s)`);
+}
+
+function detectStepsInMessage(message) {
+    /**
+     * Détecte les étapes dans un message
+     * Cherche des patterns comme:
+     * - Numéros: 1. 2. 3.
+     * - Tirets: - étape 1 - étape 2
+     * - Mots-clés: "puis", "ensuite", "après"
+     */
+    const steps = [];
+    
+    // Pattern 1: Numéros (1. 2. 3. ou 1) 2) 3))
+    const numberedPattern = /(?:^|\n)\s*(\d+)[.)]\s*(.+?)(?=\n\s*\d+[.)]|\n\n|$)/gs;
+    let match;
+    
+    while ((match = numberedPattern.exec(message)) !== null) {
+        steps.push({
+            title: match[2].trim().substring(0, 100),
+            description: match[2].trim().length > 100 ? '...' : ''
+        });
+    }
+    
+    // Pattern 2: Tirets ou puces
+    if (steps.length === 0) {
+        const bulletPattern = /(?:^|\n)\s*[-•*]\s*(.+?)(?=\n\s*[-•*]|\n\n|$)/gs;
+        while ((match = bulletPattern.exec(message)) !== null) {
+            steps.push({
+                title: match[1].trim().substring(0, 100),
+                description: match[1].trim().length > 100 ? '...' : ''
+            });
+        }
+    }
+    
+    // Pattern 3: Mots-clés de séquence
+    if (steps.length === 0) {
+        const sequenceWords = ['puis', 'ensuite', 'après', 'enfin', 'finalement'];
+        const parts = message.split(new RegExp(`\\b(${sequenceWords.join('|')})\\b`, 'gi'));
+        
+        if (parts.length > 2) {
+            for (let i = 0; i < parts.length; i += 2) {
+                const part = parts[i].trim();
+                if (part && part.length > 5) {
+                    steps.push({
+                        title: part.substring(0, 100),
+                        description: part.length > 100 ? '...' : ''
+                    });
+                }
+            }
+        }
+    }
+    
+    return steps;
+}
+
+function addTodo(title, description = '', status = 'pending') {
+    /**
+     * Ajoute un TODO à la liste
+     * @param {string} title - Titre du TODO
+     * @param {string} description - Description optionnelle
+     * @param {string} status - 'pending', 'in-progress', 'completed'
+     */
+    const todo = {
+        id: currentTodoId++,
+        title: title,
+        description: description,
+        status: status,
+        createdAt: Date.now()
+    };
+    
+    todoList.push(todo);
+    renderTodoList();
+    
+    addLog('info', `TODO ajouté: ${title.substring(0, 50)}`);
+}
+
+function updateTodoStatus(todoId, newStatus) {
+    /**
+     * Met à jour le statut d'un TODO
+     */
+    const todo = todoList.find(t => t.id === todoId);
+    if (!todo) return;
+    
+    const oldStatus = todo.status;
+    todo.status = newStatus;
+    
+    renderTodoList();
+    
+    addLog('success', `TODO ${todoId} : ${oldStatus} → ${newStatus}`);
+    
+    // Si terminé, passer au suivant automatiquement
+    if (newStatus === 'completed') {
+        const nextTodo = todoList.find(t => t.status === 'pending');
+        if (nextTodo) {
+            setTimeout(() => {
+                updateTodoStatus(nextTodo.id, 'in-progress');
+            }, 500);
+        }
+    }
+}
+
+function removeTodo(todoId) {
+    /**
+     * Supprime un TODO de la liste
+     */
+    const index = todoList.findIndex(t => t.id === todoId);
+    if (index !== -1) {
+        todoList.splice(index, 1);
+        renderTodoList();
+        addLog('info', `TODO ${todoId} supprimé`);
+    }
+}
+
+function clearCompletedTodos() {
+    /**
+     * Supprime tous les TODO terminés
+     */
+    const completedCount = todoList.filter(t => t.status === 'completed').length;
+    todoList = todoList.filter(t => t.status !== 'completed');
+    renderTodoList();
+    addLog('success', `${completedCount} TODO(s) terminé(s) supprimé(s)`);
+}
+
+function renderTodoList() {
+    /**
+     * Affiche la liste des TODO dans l'interface
+     */
+    const container = document.getElementById('todo-list');
+    if (!container) return;
+    
+    // Vider le conteneur
+    container.innerHTML = '';
+    
+    if (todoList.length === 0) {
+        container.innerHTML = '<div class="empty-state">Aucune séquence en cours</div>';
+        return;
+    }
+    
+    // Créer les éléments TODO
+    todoList.forEach(todo => {
+        const todoElement = createTodoElement(todo);
+        container.appendChild(todoElement);
+    });
+}
+
+function createTodoElement(todo) {
+    /**
+     * Crée l'élément HTML pour un TODO
+     */
+    const div = document.createElement('div');
+    div.className = `todo-item ${todo.status}`;
+    div.dataset.todoId = todo.id;
+    
+    // Icône selon le statut
+    let icon = '⏳';
+    let statusText = 'En attente';
+    
+    if (todo.status === 'in-progress') {
+        icon = '⚙️';
+        statusText = 'En cours';
+    } else if (todo.status === 'completed') {
+        icon = '✅';
+        statusText = 'Terminé';
+    }
+    
+    div.innerHTML = `
+        <div class="todo-icon">${icon}</div>
+        <div class="todo-content">
+            <div class="todo-title">${todo.title}</div>
+            ${todo.description ? `<div class="todo-description">${todo.description}</div>` : ''}
+            <div class="todo-status">${statusText}</div>
+        </div>
+    `;
+    
+    // Ajouter les événements de clic
+    div.onclick = () => {
+        if (todo.status === 'pending') {
+            updateTodoStatus(todo.id, 'in-progress');
+        } else if (todo.status === 'in-progress') {
+            updateTodoStatus(todo.id, 'completed');
+        }
+    };
+    
+    // Double-clic pour supprimer
+    div.ondblclick = (e) => {
+        e.stopPropagation();
+        if (confirm(`Supprimer ce TODO ?\n"${todo.title}"`)) {
+            removeTodo(todo.id);
+        }
+    };
+    
+    return div;
+}
+
+// Fonction pour marquer un TODO comme terminé depuis l'agent
+function markTodoCompleted(todoId) {
+    updateTodoStatus(todoId, 'completed');
+}
+
+// Fonction pour démarrer un TODO depuis l'agent
+function startTodo(todoId) {
+    updateTodoStatus(todoId, 'in-progress');
+}
+
+// Export des fonctions pour utilisation globale
+window.validateTodoSequence = validateTodoSequence;
+window.addTodo = addTodo;
+window.updateTodoStatus = updateTodoStatus;
+window.removeTodo = removeTodo;
+window.clearCompletedTodos = clearCompletedTodos;
+window.markTodoCompleted = markTodoCompleted;
+window.startTodo = startTodo;

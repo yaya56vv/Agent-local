@@ -35,7 +35,7 @@ async def example_basic_rag():
     Configuration des API
     
     Le système nécessite plusieurs clés API :
-    - GEMINI_API_KEY : pour les embeddings et le raisonnement
+    - OPENROUTER_API_KEY : pour le raisonnement
     - LOCAL_LLM : Ollama ou LM Studio pour la génération locale
     
     Ajoutez ces clés dans votre fichier .env à la racine du projet.
@@ -182,11 +182,11 @@ async def main():
     print("DÉMONSTRATION DU MODULE RAG")
     print("=" * 60)
     
-    # Vérifier la clé API Gemini
-    if not os.getenv("GEMINI_API_KEY"):
-        print("\n⚠️  ERREUR : GEMINI_API_KEY non configurée")
-        print("   Ajoutez votre clé API Gemini dans le fichier .env")
-        return
+    # Vérifier la clé API OpenRouter
+    # if not os.getenv("OPENROUTER_API_KEY"):
+    #     print("\n⚠️  ERREUR : OPENROUTER_API_KEY non configurée")
+    #     print("   Ajoutez votre clé API OpenRouter dans le fichier .env")
+    #     return
     
     try:
         # Exemple 1 : RAG basique

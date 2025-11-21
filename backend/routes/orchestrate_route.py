@@ -73,17 +73,12 @@ async def orchestrate(request: OrchestrateRequest):
             execution_mode=request.execution_mode
         )
         
-        # Sanitize response text to handle Unicode issues on Windows
-        response_text = result.get("response", "")
-        if response_text:
-            response_text = response_text.encode('ascii', 'replace').decode('ascii')
-        
         # Return unified response
         return OrchestrateResponse(
             intention=result.get("intention", "fallback"),
             confidence=result.get("confidence", 0.0),
             steps=result.get("steps", []),
-            response=response_text,
+            response=result.get("response", ""),
             execution_results=result.get("execution_results", []),
             requires_confirmation=result.get("requires_confirmation", False),
             execution_mode_used=result.get("execution_mode_used", "auto")

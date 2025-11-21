@@ -2,7 +2,7 @@ import re
 import json
 from typing import Dict, List, Optional, Any
 from backend.connectors.llm.openrouter import OpenRouterLLM
-from backend.connectors.llm.llm_router import pick_model
+# from backend.connectors.llm.llm_router import pick_model
 from backend.connectors.search.web_search import WebSearch
 # from backend.connectors.code.code_executor import CodeExecutor
 from backend.connectors.memory.memory_manager import MemoryManager
@@ -393,7 +393,10 @@ class Orchestrator:
             
             # Select model for this specific action if it involves LLM
             if action in ["code_analyze", "code_explain", "code_optimize", "rag_query"]:
-                model_info = pick_model(action, multimodal=multimodal)
+                # model_info = self.pick_model(action, multimodal=multimodal) # TODO: Update pick_model signature to support multimodal arg if needed, or just pass task_type
+                # For now, simple call as defined in class
+                llm_instance = self.pick_model(action)
+                model_info = {"model": llm_instance.model, "specialist": "unknown"} # Reconstruct basic info
                 self._log(f"[ORCH] Modele pour action {action} : {model_info['model']}")
                 params["_model_info"] = model_info
             
@@ -462,8 +465,22 @@ class Orchestrator:
         # Select appropriate model using router
         # Use first detected intent or "fallback"
         primary_intention = detected_intents[0] if detected_intents else "fallback"
-        model_info = pick_model(primary_intention, multimodal=multimodal)
         
+        # Use internal pick_model
+        llm_instance = self.pick_model(primary_intention)
+        
+        # Construct model_info manually since internal pick_model returns an instance, not a dict
+        model_info = {
+            "model": llm_instance.model,
+            "specialist": "reasoning", # Default
+            "reason": "Selected by internal logic"
+        }
+        
+        if primary_intention in ["vision_analysis", "image_analysis", "screenshot_analysis", "vision"]:
+             model_info["specialist"] = "vision"
+        elif primary_intention in ["code_execution", "code_analyze", "code_explain", "code_optimize", "code_debug", "coding"]:
+             model_info["specialist"] = "coding"
+
         self.current_model_info = model_info
         self._log(f"[ORCH] Modele selectionne : {model_info['model']} (specialiste: {model_info['specialist']})")
         self._log(f"[ORCH] Raison : {model_info.get('reason', 'N/A')}")
@@ -710,14 +727,15 @@ Be precise and actionable. Use exact action names from the list above."""
         Automatically uses multimodal model via router.
         """
         # Get vision model from router
-        model_info = pick_model("vision_analysis", multimodal=True)
-        self._log(f"[ORCH] Vision analysis avec modele : {model_info['model']}")
+        llm_instance = self.pick_model("vision_analysis")
+        model_name = llm_instance.model
+        self._log(f"[ORCH] Vision analysis avec modele : {model_name}")
         
         # Use vision analyzer with selected model
         return await self.vision_analyzer.analyze_image(
             image_bytes,
             prompt,
-            model=model_info["model"]
+            model=model_name
         )
     async def _action_file_list(self, path: str = ".", **kwargs) -> Dict[str, Any]:
         """List directory action."""

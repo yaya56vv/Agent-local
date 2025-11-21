@@ -57,6 +57,14 @@ class DocumentInfo(BaseModel):
     created_at: str
 
 
+class DatasetInfo(BaseModel):
+    """Dataset information"""
+    dataset: str
+    document_count: int
+    chunk_count: int
+    documents: List[Dict[str, Any]]
+
+
 @router.post("/documents/add", response_model=AddDocumentResponse)
 async def add_document(request: AddDocumentRequest):
     """
@@ -155,3 +163,34 @@ async def delete_document(doc_id: str):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to delete document: {str(e)}")
+
+
+@router.get("/datasets", response_model=List[str])
+async def list_datasets():
+    """
+    List all available datasets in the RAG store.
+    
+    Returns:
+        List of dataset names
+    """
+    try:
+        return rag_helper.get_datasets()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to list datasets: {str(e)}")
+
+
+@router.get("/datasets/{dataset_name}", response_model=DatasetInfo)
+async def get_dataset_info(dataset_name: str):
+    """
+    Get information about a specific dataset.
+    
+    Args:
+        dataset_name: Name of the dataset
+        
+    Returns:
+        Dataset statistics and document list
+    """
+    try:
+        return rag_helper.get_dataset_info(dataset_name)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get dataset info: {str(e)}")

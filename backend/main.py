@@ -4,7 +4,7 @@ load_dotenv()
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from pathlib import Path
 import os
 import sys
@@ -37,12 +37,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# Mount static files for frontend
-frontend_path = Path(__file__).parent.parent / "frontend"
-if frontend_path.exists():
-    app.mount("/", StaticFiles(directory=str(frontend_path), html=True), name="frontend")
-
 
 @app.get("/health")
 def health():
@@ -102,6 +96,12 @@ async def serve_root():
     return FileResponse(frontend_path / "index.html")
 
 
+@app.get("/ui", include_in_schema=False)
+async def serve_ui_redirect():
+    """Redirect /ui to /"""
+    return RedirectResponse(url="/")
+
+
 @app.get("/ui/rag", include_in_schema=False)
 async def serve_rag():
     """Serve RAG interface"""
@@ -109,6 +109,12 @@ async def serve_rag():
     if rag_html.exists():
         return FileResponse(str(rag_html))
     return {"error": "RAG interface not found"}
+
+
+# Mount static files for frontend (MUST BE LAST to avoid capturing API routes)
+frontend_path = Path(__file__).parent.parent / "frontend"
+if frontend_path.exists():
+    app.mount("/", StaticFiles(directory=str(frontend_path), html=True), name="frontend")
 
 
  

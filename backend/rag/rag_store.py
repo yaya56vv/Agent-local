@@ -1,5 +1,5 @@
 """
-RAG Store - Local document storage with Gemini embeddings
+RAG Store - Local document storage with embeddings
 Stores documents in SQLite with vector embeddings for semantic search
 """
 
@@ -10,7 +10,7 @@ import hashlib
 from typing import List, Dict, Any, Optional
 from pathlib import Path
 import numpy as np
-# import aiohttp  <-- Removed Gemini dependency
+# import aiohttp
 import asyncio
 from datetime import datetime
 from sentence_transformers import SentenceTransformer

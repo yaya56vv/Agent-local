@@ -11,9 +11,9 @@ class Settings(BaseSettings):
     BRAVE_API_KEY: str = ""
     
     # --- MODEL CONFIGURATION ---
-    MODEL_REASONING: str = "google/gemini-2.0-flash-exp:free"
-    MODEL_CODING: str = "google/gemini-2.0-flash-exp:free"
-    MODEL_VISION: str = "google/gemini-2.0-flash-exp:free"
+    MODEL_REASONING: str = "qwen/qwen3-30b-a3b-instruct-2507"
+    MODEL_CODING: str = "qwen/qwen3-30b-a3b-instruct-2507"
+    MODEL_VISION: str = "qwen/qwen3-30b-a3b-instruct-2507"
     MODEL_SPEECH: str | None = None
     
     # --- LOCAL LLM ---
@@ -36,12 +36,12 @@ class Settings(BaseSettings):
 
     # --- LLM ROUTER (Mission 10) ---
     # Modèles spécialisés optionnels
-    LLM_VISION_MODEL: str = "google/gemini-2.0-flash-exp:free"
-    LLM_CODE_MODEL: str = "google/gemini-2.0-flash-exp:free"
-    LLM_REASONING_MODEL: str = "google/gemini-2.0-flash-exp:free"
-    LLM_CONVERSATION_MODEL: str = "google/gemini-2.0-flash-exp:free"
-    LLM_RAG_MODEL: str = "google/gemini-2.0-flash-exp:free"
-    LLM_DEFAULT_MODEL: str = "google/gemini-2.0-flash-exp:free"
+    LLM_VISION_MODEL: str = "qwen/qwen3-30b-a3b-instruct-2507"
+    LLM_CODE_MODEL: str = "qwen/qwen3-30b-a3b-instruct-2507"
+    LLM_REASONING_MODEL: str = "qwen/qwen3-30b-a3b-instruct-2507"
+    LLM_CONVERSATION_MODEL: str = "qwen/qwen3-30b-a3b-instruct-2507"
+    LLM_RAG_MODEL: str = "qwen/qwen3-30b-a3b-instruct-2507"
+    LLM_DEFAULT_MODEL: str = "qwen/qwen3-30b-a3b-instruct-2507"
     
     # Activation des spécialistes (permet de désactiver certains)
     LLM_ENABLE_VISION: bool = True
@@ -57,5 +57,6 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
+        extra = "ignore"
 
 settings = Settings()

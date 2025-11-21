@@ -304,7 +304,7 @@ Technologies:
 - Python 3.11+
 - FastAPI pour l'API
 - SQLite pour la persistance
-- Gemini API pour les embeddings
+- Sentence Transformers pour les embeddings
 - Ollama/LM Studio pour le LLM local
     """
     

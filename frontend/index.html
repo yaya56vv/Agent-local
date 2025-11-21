@@ -14,33 +14,40 @@
     
     <!-- 1. TIMELINE (Haut) -->
     <header class="dashboard-header">
-        <div class="header-brand">
-            <span class="brand-icon">🤖</span>
-            <div class="brand-info">
-                <h1>AGENT LOCAL</h1>
-                <small id="session-id">Session: ...</small>
+        <!-- Top Bar: Brand + Status + Controls -->
+        <div class="header-top-bar">
+            <div class="header-brand">
+                <span class="brand-icon">🤖</span>
+                <div class="brand-info">
+                    <h1>AGENT LOCAL</h1>
+                    <small id="session-id">Session: ...</small>
+                </div>
+            </div>
+            
+            <div class="header-controls">
+                <div id="timer-display" class="timer-display">00:00:00</div>
+                <button class="btn-stop-emergency" onclick="stopAgent()" title="ARRÊT D'URGENCE">
+                    <i class="fas fa-power-off"></i> STOP
+                </button>
             </div>
         </div>
         
-        <!-- La Timeline Linéaire -->
+        <!-- Workflow Timeline (Process Visualization) -->
         <div class="timeline-wrapper">
             <div id="timeline-track" class="timeline-track">
-                <!-- Les noeuds seront injectés ici par JS -->
-                <!-- Exemple:
+                <!-- Process cards will be injected here by JS -->
+                <!-- Example:
                 <div class="timeline-node active">
-                    <span class="time">10:00:05</span>
-                    <span class="icon">🧠</span>
-                    <span class="label">Analyse</span>
+                    <div class="timeline-node-header">
+                        <div class="timeline-node-icon">🌐</div>
+                        <div class="timeline-node-tool">Web Search</div>
+                    </div>
+                    <div class="timeline-node-action">Recherche</div>
+                    <div class="timeline-node-location">google.com/search?q=...</div>
+                    <div class="timeline-node-time">10:00:05</div>
                 </div>
                 -->
             </div>
-        </div>
-
-        <div class="header-controls">
-            <div id="timer-display" class="timer-display">00:00:00</div>
-            <button class="btn-stop-emergency" onclick="stopAgent()" title="ARRÊT D'URGENCE">
-                <i class="fas fa-power-off"></i> STOP
-            </button>
         </div>
     </header>
 
@@ -55,6 +62,13 @@
             
             <div class="panel-content">
                 <!-- Zone Upload RAG -->
+                <div class="rag-upload-controls">
+                    <select id="rag-dataset-select" class="rag-select" title="Choisir le dataset cible">
+                        <option value="default">Dataset: default</option>
+                        <option value="new">+ Nouveau dataset...</option>
+                    </select>
+                    <input type="text" id="rag-new-dataset-input" class="rag-input hidden" placeholder="Nom du dataset..." />
+                </div>
                 <div class="drop-zone" id="rag-drop-zone">
                     <i class="fas fa-cloud-upload-alt"></i>
                     <p>Glisser documents pour <strong>RAG</strong></p>
@@ -69,6 +83,14 @@
                         <li><i class="fas fa-folder"></i> backend/</li>
                         <li><i class="fas fa-file-word"></i> rapport_mission.docx</li>
                     </ul>
+                </div>
+
+                <!-- Artefacts (Fichiers générés) - DÉPLACÉ ICI -->
+                <div class="artifacts-card">
+                    <h3><i class="fas fa-magic"></i> Fichiers Générés</h3>
+                    <div id="artifacts-list" class="artifacts-list">
+                        <div class="empty-state">Aucun fichier généré récemment</div>
+                    </div>
                 </div>
 
                 <!-- État Mémoire -->
@@ -102,11 +124,18 @@
                     <button id="mic-button" class="btn-icon" onclick="toggleMicrophone()" title="F1: Micro">
                         <i class="fas fa-microphone"></i>
                     </button>
-                    <textarea 
-                        id="user-message" 
-                        placeholder="Instructions pour l'agent..." 
+                    <button id="attach-button" class="btn-icon" onclick="attachFileToContext()" title="Ajouter un fichier au contexte">
+                        <i class="fas fa-paperclip"></i>
+                    </button>
+                    <input type="file" id="context-file-input" style="display: none;" accept=".txt,.md,.pdf,.docx,.py,.js,.html,.css,.json" multiple />
+                    <textarea
+                        id="user-message"
+                        placeholder="Instructions pour l'agent..."
                         rows="1"
                     ></textarea>
+                    <button id="validate-todo-btn" class="btn-validate-todo" onclick="validateTodoSequence()" title="Valider la séquence TODO">
+                        <i class="fas fa-check-circle"></i>
+                    </button>
                     <button class="btn-send" onclick="sendMessage()">
                         <i class="fas fa-paper-plane"></i>
                     </button>
@@ -145,18 +174,12 @@
                 </div>
             </div>
 
-            <!-- Artefacts (Fichiers générés) -->
-            <div class="artifacts-card">
-                <h3><i class="fas fa-magic"></i> Fichiers Générés</h3>
-                <div id="artifacts-list" class="artifacts-list">
-                    <div class="empty-state">Aucun fichier généré récemment</div>
-                    <!-- Exemple:
-                    <div class="artifact-item">
-                        <i class="fas fa-file-word"></i>
-                        <span>synthese_recherche.docx</span>
-                        <button class="btn-mini"><i class="fas fa-external-link-alt"></i></button>
-                    </div>
-                    -->
+            <!-- TODO List / Séquences d'Actions -->
+            <div class="todo-card">
+                <h3><i class="fas fa-tasks"></i> Séquences d'Actions</h3>
+                <div id="todo-list" class="todo-list">
+                    <div class="empty-state">Aucune séquence en cours</div>
+                    <!-- Les TODO seront ajoutés dynamiquement ici -->
                 </div>
             </div>
 

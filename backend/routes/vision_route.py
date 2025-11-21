@@ -14,7 +14,7 @@ async def analyze_image(
     prompt: Optional[str] = Form(None, description="Optional prompt to guide analysis")
 ):
     """
-    Analyze an image using Gemini multimodal vision.
+    Analyze an image using multimodal vision.
     
     Args:
         file: Image file to analyze
@@ -170,7 +170,7 @@ async def health_check():
                 "status": "unhealthy",
                 "module": "vision",
                 "api_configured": False,
-                "error": "GEMINI_API_KEY not configured"
+                "error": "Vision API key not configured"
             }
     except Exception as e:
         return {
