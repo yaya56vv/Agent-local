@@ -17,6 +17,9 @@ from backend.config.settings import settings
 from backend.orchestrator.clients.files_client import FilesClient
 from backend.orchestrator.clients.memory_client import MemoryClient
 from backend.orchestrator.clients.rag_client import RagClient
+from backend.orchestrator.clients.vision_client import VisionClient
+from backend.orchestrator.clients.search_client import SearchClient
+from backend.orchestrator.clients.system_client import SystemClient
 
 
 class Orchestrator:
@@ -38,19 +41,22 @@ class Orchestrator:
         # Track current model info for logging
         self.current_model_info = None
         
-        # Initialize MCP clients (Phase 1: Files, Memory, RAG)
+        # Initialize MCP clients (Phase 1-3: Files, Memory, RAG, Vision, Search, System)
         self.files_client = FilesClient(base_url="http://localhost:8001")
         self.memory_client = MemoryClient(base_url="http://localhost:8002")
         self.rag_client = RagClient(base_url="http://localhost:8003")
+        self.vision_client = VisionClient(base_url="http://localhost:8004")
+        self.search_client = SearchClient(base_url="http://localhost:8005")
+        self.system_client = SystemClient(base_url="http://localhost:8006")
         
         # Initialize module connectors (legacy - will be migrated in phases)
-        self.web_search = WebSearch()
+        self.web_search = WebSearch()  # Keep for backward compatibility during migration
         # self.code_executor = CodeExecutor()
         self.memory_manager = MemoryManager()  # Keep for backward compatibility during migration
         self.file_manager = FileManager()  # Keep for backward compatibility during migration
-        self.system_actions = SystemActions()
+        self.system_actions = SystemActions()  # Keep for backward compatibility during migration
         self.input_controller = InputController()
-        self.vision_analyzer = VisionAnalyzer()
+        self.vision_analyzer = VisionAnalyzer()  # Keep for backward compatibility during migration
         self.rag = RAGStore()  # Keep for backward compatibility during migration
         
         # Intent patterns for quick detection
@@ -676,8 +682,9 @@ Be precise and actionable. Use exact action names from the list above."""
     # ============================================================
     
     async def _action_search_web(self, query: str, max_results: int = 5, **kwargs) -> Dict[str, Any]:
-        """Execute web search action."""
-        return await self.web_search.search(query, max_results)
+        """Execute web search action via MCP Search Client."""
+        # Use MCP Search Client - defaults to search_all for comprehensive results
+        return await self.search_client.search_all(query)
     
     # async def _action_code_execute(self, code: str, **kwargs) -> Dict[str, Any]:
     #     """Execute code action."""
@@ -700,20 +707,36 @@ Be precise and actionable. Use exact action names from the list above."""
     #     return await self.code_executor.debug(code, error)
     
     async def _action_system_open(self, path: str, **kwargs) -> Dict[str, Any]:
-        """Open file or folder action."""
-        return self.system_actions.open_path(path)
+        """Open file or folder action via MCP System Client."""
+        # Determine if it's a file or folder and call appropriate MCP method
+        import os
+        if os.path.isfile(path):
+            return await self.system_client.open_file(path)
+        else:
+            return await self.system_client.open_folder(path)
     
     async def _action_system_run(self, path: str, args: List[str] = None, **kwargs) -> Dict[str, Any]:
-        """Run program action."""
-        return self.system_actions.run_program(path, args)
+        """Run program action via MCP System Client."""
+        return await self.system_client.run_program(path, args)
     
     async def _action_system_list_processes(self, **kwargs) -> Dict[str, Any]:
-        """List processes action."""
-        return self.system_actions.list_processes()
+        """List processes action via MCP System Client."""
+        return await self.system_client.list_processes()
     
     async def _action_system_kill(self, name: str, **kwargs) -> Dict[str, Any]:
-        """Kill process action."""
-        return self.system_actions.kill_process(name)
+        """Kill process action via MCP System Client."""
+        # Note: MCP System Client uses PID, but we receive name
+        # For now, we'll need to list processes first to get PID
+        # This is a simplified implementation - may need enhancement
+        processes = await self.system_client.list_processes()
+        # Find process by name and get PID
+        # TODO: Implement proper name-to-PID resolution
+        # For now, assume 'name' might be a PID
+        try:
+            pid = int(name)
+            return await self.system_client.kill_process(pid)
+        except ValueError:
+            return {"status": "error", "message": "Process name resolution not yet implemented. Please provide PID."}
     
     async def _action_file_read(self, path: str, **kwargs) -> Dict[str, Any]:
         """Read file action via MCP."""
@@ -733,20 +756,17 @@ Be precise and actionable. Use exact action names from the list above."""
 
     async def _action_vision_analyze(self, image_bytes: bytes, prompt: str = "", **kwargs) -> Dict[str, Any]:
         """
-        Analyze image action using vision specialist.
-        Automatically uses multimodal model via router.
+        Analyze image action via MCP Vision Client.
         """
-        # Get vision model from router
-        llm_instance = self.pick_model("vision_analysis")
-        model_name = llm_instance.model
-        self._log(f"[ORCH] Vision analysis avec modele : {model_name}")
+        self._log(f"[ORCH] Vision analysis via MCP Vision Client")
         
-        # Use vision analyzer with selected model
-        return await self.vision_analyzer.analyze_image(
-            image_bytes,
-            prompt,
-            model=model_name
-        )
+        # Use MCP Vision Client for image analysis
+        if prompt:
+            # If there's a specific prompt, use analyze_image
+            return await self.vision_client.analyze_image(image_bytes)
+        else:
+            # Default to analyze_screenshot for general analysis
+            return await self.vision_client.analyze_screenshot(image_bytes)
     async def _action_file_list(self, path: str = ".", **kwargs) -> Dict[str, Any]:
         """List directory action via MCP."""
         return await self.files_client.list_dir(path)
