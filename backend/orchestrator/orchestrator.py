@@ -13,6 +13,11 @@ from backend.connectors.vision.vision_analyzer import VisionAnalyzer
 from backend.rag.rag_store import RAGStore
 from backend.config.settings import settings
 
+# Import MCP clients
+from backend.orchestrator.clients.files_client import FilesClient
+from backend.orchestrator.clients.memory_client import MemoryClient
+from backend.orchestrator.clients.rag_client import RagClient
+
 
 class Orchestrator:
     """
@@ -33,15 +38,20 @@ class Orchestrator:
         # Track current model info for logging
         self.current_model_info = None
         
-        # Initialize module connectors
+        # Initialize MCP clients (Phase 1: Files, Memory, RAG)
+        self.files_client = FilesClient(base_url="http://localhost:8001")
+        self.memory_client = MemoryClient(base_url="http://localhost:8002")
+        self.rag_client = RagClient(base_url="http://localhost:8003")
+        
+        # Initialize module connectors (legacy - will be migrated in phases)
         self.web_search = WebSearch()
         # self.code_executor = CodeExecutor()
-        self.memory_manager = MemoryManager()
-        self.file_manager = FileManager()
+        self.memory_manager = MemoryManager()  # Keep for backward compatibility during migration
+        self.file_manager = FileManager()  # Keep for backward compatibility during migration
         self.system_actions = SystemActions()
         self.input_controller = InputController()
         self.vision_analyzer = VisionAnalyzer()
-        self.rag = RAGStore()
+        self.rag = RAGStore()  # Keep for backward compatibility during migration
         
         # Intent patterns for quick detection
         self.intent_patterns = {
@@ -195,8 +205,8 @@ class Orchestrator:
         
         # 1. Conversation History (Short-term)
         try:
-            # Get recent conversation history from memory
-            context = self.memory_manager.get_context(session_id, max_messages=5)
+            # Get recent conversation history from memory via MCP
+            context = await self.memory_client.get_context(session_id, max_messages=5)
             
             if context:
                 context_parts.append(f"=== RECENT CONVERSATION ===\n{context}")
@@ -209,7 +219,7 @@ class Orchestrator:
             rag_context_parts = []
             
             # A. CORE MEMORY (Permanent: Identity, Rules, PC Structure)
-            core_results = await self.rag.query("agent_core", prompt, top_k=2)
+            core_results = await self.rag_client.query("agent_core", prompt, top_k=2)
             if core_results:
                 core_text = "\n".join([f"- {r['content']}" for r in core_results])
                 rag_context_parts.append(f"--- CORE KNOWLEDGE (Permanent) ---\n{core_text}")
@@ -218,13 +228,13 @@ class Orchestrator:
             # We search in all project datasets (starting with 'project_')
             # For now, we just search a generic 'current_projects' dataset or infer from prompt
             # Simplified: Search in 'projects' dataset
-            project_results = await self.rag.query("projects", prompt, top_k=2)
+            project_results = await self.rag_client.query("projects", prompt, top_k=2)
             if project_results:
                 proj_text = "\n".join([f"- {r['content']} (Source: {r['filename']})" for r in project_results])
                 rag_context_parts.append(f"--- PROJECT CONTEXT (Ongoing) ---\n{proj_text}")
                 
             # C. SCRATCHPAD (Ephemeral: Temporary info)
-            scratch_results = await self.rag.query("scratchpad", prompt, top_k=1)
+            scratch_results = await self.rag_client.query("scratchpad", prompt, top_k=1)
             if scratch_results:
                 scratch_text = "\n".join([f"- {r['content']}" for r in scratch_results])
                 rag_context_parts.append(f"--- TEMPORARY NOTES (Ephemeral) ---\n{scratch_text}")
@@ -340,11 +350,11 @@ class Orchestrator:
             else:
                 self._log("[ORCH] Mode auto - plan necessite validation, aucune execution")
         
-        # Add prompt to memory
+        # Add prompt to memory via MCP
         try:
-            self.memory_manager.add(session_id, prompt, role="user")
+            await self.memory_client.add_message(session_id, "user", prompt)
             if response:
-                self.memory_manager.add(session_id, response, role="assistant")
+                await self.memory_client.add_message(session_id, "assistant", response)
         except Exception as e:
             self._log(f"[ORCH ERROR] Erreur memoire : {str(e)}")
         
@@ -706,19 +716,19 @@ Be precise and actionable. Use exact action names from the list above."""
         return self.system_actions.kill_process(name)
     
     async def _action_file_read(self, path: str, **kwargs) -> Dict[str, Any]:
-        """Read file action."""
-        return self.file_manager.read(path)
+        """Read file action via MCP."""
+        return await self.files_client.read_file(path)
     
     async def _action_file_write(self, path: str, content: str, **kwargs) -> Dict[str, Any]:
-        """Write file action."""
-        return self.file_manager.write(path, content, allow=True)
+        """Write file action via MCP."""
+        return await self.files_client.write_file(path, content)
     
     async def _action_file_move(self, src: str, dest: str, **kwargs) -> Dict[str, Any]:
-        """Move file action."""
+        """Move file action - not yet implemented in MCP, using legacy."""
         return self.file_manager.move(src, dest, allow=True)
 
     async def _action_file_copy(self, src: str, dest: str, **kwargs) -> Dict[str, Any]:
-        """Copy file action."""
+        """Copy file action - not yet implemented in MCP, using legacy."""
         return self.file_manager.copy(src, dest, allow=True)
 
     async def _action_vision_analyze(self, image_bytes: bytes, prompt: str = "", **kwargs) -> Dict[str, Any]:
@@ -738,36 +748,36 @@ Be precise and actionable. Use exact action names from the list above."""
             model=model_name
         )
     async def _action_file_list(self, path: str = ".", **kwargs) -> Dict[str, Any]:
-        """List directory action."""
-        return self.file_manager.list_dir(path)
+        """List directory action via MCP."""
+        return await self.files_client.list_dir(path)
     
     async def _action_file_delete(self, path: str, **kwargs) -> Dict[str, Any]:
-        """Delete file action."""
-        return self.file_manager.delete(path, allow=True)
+        """Delete file action via MCP."""
+        return await self.files_client.delete_file(path)
     
     async def _action_rag_query(self, dataset: str, question: str, top_k: int = 5, **kwargs) -> Dict[str, Any]:
-        """Query RAG action."""
-        results = await self.rag.query(dataset, question, top_k)
+        """Query RAG action via MCP."""
+        results = await self.rag_client.query(dataset, question, top_k)
         return {"status": "success", "results": results}
     
     async def _action_rag_add(self, dataset: str, filename: str, content: str, metadata: Dict[str, Any] = None, **kwargs) -> Dict[str, Any]:
-        """Add document to RAG action."""
-        doc_id = await self.rag.add_document(dataset, filename, content, metadata)
+        """Add document to RAG action via MCP."""
+        doc_id = await self.rag_client.add_document(dataset, filename, content, metadata)
         return {"status": "success", "document_id": doc_id}
     
     async def _action_memory_recall(self, session_id: str = "default", max_messages: int = 10, **kwargs) -> Dict[str, Any]:
-        """Recall memory action."""
-        context = self.memory_manager.get_context(session_id, max_messages)
+        """Recall memory action via MCP."""
+        context = await self.memory_client.get_context(session_id, max_messages)
         return {"status": "success", "context": context}
     
     async def _action_memory_search(self, query: str, session_id: str = None, **kwargs) -> Dict[str, Any]:
-        """Search memory action."""
-        results = self.memory_manager.search(query, session_id)
+        """Search memory action via MCP."""
+        results = await self.memory_client.search(query, session_id)
         return {"status": "success", "results": results}
     
     async def _action_memory_cleanup(self, retention_days: int = 1, **kwargs) -> Dict[str, Any]:
-        """Clean up old memory action."""
-        return self.rag.cleanup_memory(retention_days)
+        """Clean up old memory action via MCP."""
+        return await self.rag_client.cleanup_memory(retention_days)
 
     async def _action_mouse_move(self, x: int, y: int, duration: float = 0.5, **kwargs) -> Dict[str, Any]:
         """Move mouse action."""
@@ -813,10 +823,10 @@ Be precise and actionable. Use exact action names from the list above."""
         previous_result = None
         memory_updated = False
         
-        # Add prompt to memory
+        # Add prompt to memory via MCP
         if prompt:
             try:
-                self.memory_manager.add(session_id, prompt, role="user")
+                await self.memory_client.add_message(session_id, "user", prompt)
                 memory_updated = True
             except Exception as e:
                 print(f"Warning: Could not add prompt to memory: {e}")
@@ -860,10 +870,10 @@ Be precise and actionable. Use exact action names from the list above."""
             # Generate final response
             final_response = plan.get("response", "Task completed")
             
-            # Add response to memory
+            # Add response to memory via MCP
             if final_response:
                 try:
-                    self.memory_manager.add(session_id, final_response, role="assistant")
+                    await self.memory_client.add_message(session_id, "assistant", final_response)
                     memory_updated = True
                 except Exception as e:
                     print(f"Warning: Could not add response to memory: {e}")
