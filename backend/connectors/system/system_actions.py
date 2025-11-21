@@ -3,6 +3,7 @@ System Actions Module
 Permet à l'agent d'interagir avec le système Windows de manière sécurisée.
 """
 
+
 import os
 import subprocess
 import platform
@@ -25,6 +26,7 @@ try:
     PSUTIL_AVAILABLE = True
 except ImportError:
     PSUTIL_AVAILABLE = False
+    psutil = None
 
 
 class SystemActionsError(Exception):
