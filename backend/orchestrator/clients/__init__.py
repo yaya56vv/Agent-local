@@ -11,6 +11,7 @@ from .search_client import SearchClient
 from .system_client import SystemClient
 from .control_client import ControlClient
 from .local_llm_client import LocalLlmClient
+from .documents_client import DocumentsClient
 
 __all__ = [
     "FilesClient",
@@ -21,4 +22,5 @@ __all__ = [
     "SystemClient",
     "ControlClient",
     "LocalLlmClient",
+    "DocumentsClient",
 ]
