@@ -58,7 +58,7 @@ def test_list_processes():
     system = SystemActions()
 
     try:
-        result = system.list_processes(allow=True)
+        result = system.list_processes()
         print(f"Found {result['count']} processes")
         # Afficher les 5 premiers
         for proc in result['processes'][:5]:

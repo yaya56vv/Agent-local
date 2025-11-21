@@ -17,7 +17,7 @@ def test_orchestrator(prompt: str, execution_mode: str = "auto", test_name: str 
     
     try:
         response = requests.post(
-            f"{BASE_URL}/orchestrate",
+            f"{BASE_URL}/orchestrate/",
             json={
                 "prompt": prompt,
                 "execution_mode": execution_mode

@@ -1,1 +1,0 @@
-﻿# Edition Word
