@@ -32,21 +32,45 @@
             </div>
         </div>
         
-        <!-- Workflow Timeline (Process Visualization) -->
-        <div class="timeline-wrapper">
-            <div id="timeline-track" class="timeline-track">
-                <!-- Process cards will be injected here by JS -->
-                <!-- Example:
-                <div class="timeline-node active">
-                    <div class="timeline-node-header">
-                        <div class="timeline-node-icon">🌐</div>
-                        <div class="timeline-node-tool">Web Search</div>
+        <!-- Real-time Agent Status (New Design) -->
+        <div class="agent-monitor-container">
+            <!-- Active Agent Card (Will be duplicated if multiple agents active) -->
+            <div id="active-agent-card" class="agent-monitor-card">
+                <div class="agent-card-header">
+                    <div class="agent-identity">
+                        <div class="agent-avatar-large">🤖</div>
+                        <div class="agent-details">
+                            <h2 id="monitor-agent-name">Orchestrator</h2>
+                            <span id="monitor-agent-role">System Controller</span>
+                        </div>
                     </div>
-                    <div class="timeline-node-action">Recherche</div>
-                    <div class="timeline-node-location">google.com/search?q=...</div>
-                    <div class="timeline-node-time">10:00:05</div>
+                    <div class="agent-status-badge" id="monitor-status-badge">
+                        <span class="status-indicator-dot"></span>
+                        <span id="monitor-status-text">INITIALIZING</span>
+                    </div>
                 </div>
-                -->
+                
+                <div class="agent-card-body">
+                    <div class="agent-main-action">
+                        <span class="action-label">ACTION EN COURS</span>
+                        <div class="action-text" id="monitor-action-text">Démarrage du système...</div>
+                    </div>
+                    
+                    <div class="agent-location-info">
+                        <i class="fas fa-map-marker-alt"></i>
+                        <span id="monitor-location-text">Système</span>
+                    </div>
+                </div>
+                
+                <div class="agent-card-footer">
+                    <div class="agent-timer">
+                        <i class="fas fa-stopwatch"></i>
+                        <span id="monitor-duration">00:00</span>
+                    </div>
+                    <div class="agent-progress-bar">
+                        <div class="progress-fill" id="monitor-progress"></div>
+                    </div>
+                </div>
             </div>
         </div>
     </header>
@@ -146,6 +170,28 @@
         <!-- COLONNE DROITE : MISSION CONTROL -->
         <aside class="panel panel-right">
             
+            <!-- Agents & Routing -->
+            <div class="agents-card">
+                <h3><i class="fas fa-users-cog"></i> Agents & Routing</h3>
+                
+                <!-- Auto-routing Toggle -->
+                <div class="routing-control">
+                    <label class="switch-label">
+                        <span class="label-text">Auto-routing</span>
+                        <label class="switch">
+                            <input type="checkbox" id="auto-routing-toggle" checked>
+                            <span class="slider round"></span>
+                        </label>
+                    </label>
+                </div>
+
+                <!-- Agent List -->
+                <div id="agents-list" class="agents-list">
+                    <div class="loading-agents">Chargement des agents...</div>
+                    <!-- Agents will be injected here -->
+                </div>
+            </div>
+
             <!-- État Actuel -->
             <div class="status-card">
                 <h3><i class="fas fa-heartbeat"></i> Statut Agent</h3>

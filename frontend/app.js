@@ -24,6 +24,12 @@ let activityLog = []; // Historique des activités avec durées
 let activityTracker = null; // Timer pour le tracking continu
 let idleTimer = null; // Timer pour détecter l'inactivité
 
+// État Multi-Agents
+let selectedAgentId = sessionStorage.getItem('selectedAgentId') || null;
+let isAutoRoutingEnabled = sessionStorage.getItem('isAutoRoutingEnabled') !== 'false'; // Default true
+let mainSessionId = generateSessionId(); // Session principale (Orchestrator)
+let agentSessions = JSON.parse(sessionStorage.getItem('agentSessions')) || {}; // Sessions par agent
+
 // État du microphone et TTS
 let isRecording = false;
 let mediaRecorder = null;
@@ -89,6 +95,26 @@ document.addEventListener('DOMContentLoaded', () => {
     // Initialiser l'explorateur de fichiers
     initFileExplorer();
     
+    // Initialiser les agents
+    initAgents();
+    
+    // Restaurer la session correcte
+    if (selectedAgentId) {
+        // Si un agent était sélectionné, on restaure sa session
+        if (!agentSessions[selectedAgentId]) {
+            agentSessions[selectedAgentId] = generateSessionId();
+            sessionStorage.setItem('agentSessions', JSON.stringify(agentSessions));
+        }
+        sessionId = agentSessions[selectedAgentId];
+        document.getElementById('session-id').textContent = sessionId;
+        // Charger l'historique de cet agent
+        loadSessionHistory(sessionId);
+    } else {
+        // Sinon session principale
+        sessionId = mainSessionId;
+        document.getElementById('session-id').textContent = sessionId;
+    }
+
     // Initialiser le drag & drop pour le contexte
     setupContextDragDrop();
     
@@ -857,8 +883,20 @@ function resetChat() {
     const floatingChat = document.getElementById('floating-chat-window');
     if (floatingChat) floatingChat.innerHTML = '';
     
-    // Générer une nouvelle session
-    sessionId = generateSessionId();
+    // Générer une nouvelle session (pour le contexte actuel)
+    const newSession = generateSessionId();
+    
+    if (selectedAgentId) {
+        // Si on est sur un agent spécifique, on reset SA session
+        agentSessions[selectedAgentId] = newSession;
+        sessionStorage.setItem('agentSessions', JSON.stringify(agentSessions));
+        sessionId = newSession;
+    } else {
+        // Sinon on reset la session principale
+        mainSessionId = newSession;
+        sessionId = newSession;
+    }
+    
     document.getElementById('session-id').textContent = sessionId;
     
     addLog('success', '🔄 Chat réinitialisé (F5) - Nouvelle session créée');
@@ -904,7 +942,9 @@ async function sendMessage() {
             body: JSON.stringify({
                 prompt: message,
                 session_id: sessionId,
-                execution_mode: "auto"
+                execution_mode: "auto",
+                agent_id: selectedAgentId,
+                auto_routing: isAutoRoutingEnabled
             })
         });
 
@@ -934,7 +974,56 @@ async function sendMessage() {
     }
 }
 
-function appendChat(type, text) {
+async function loadSessionHistory(targetSessionId) {
+    addLog('info', `Chargement historique session: ${targetSessionId}`);
+    
+    // Vider le chat actuel
+    const chatWindow = document.getElementById('chat-window');
+    chatWindow.innerHTML = '';
+    const floatingChat = document.getElementById('floating-chat-window');
+    if (floatingChat) floatingChat.innerHTML = '';
+    
+    try {
+        // Utiliser l'endpoint /memory/get (POST) ou /memory/{session_id} (GET)
+        // D'après memory_route.py, c'est POST /memory/get
+        const response = await fetch(`${API_BASE_URL}/memory/get`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                session_id: targetSessionId,
+                limit: 50 // Charger les 50 derniers messages
+            })
+        });
+
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const data = await response.json();
+        
+        if (data.data && data.data.messages) {
+            const messages = data.data.messages;
+            addLog('success', `${messages.length} messages chargés`);
+            
+            // Afficher les messages
+            messages.forEach(msg => {
+                // Mapper les rôles
+                let type = 'user';
+                if (msg.role === 'assistant') type = 'agent';
+                else if (msg.role === 'system') type = 'system';
+                
+                appendChat(type, msg.content, false); // false = pas d'auto-scroll à chaque message
+            });
+            
+            // Scroll à la fin une seule fois
+            chatWindow.scrollTop = chatWindow.scrollHeight;
+            if (floatingChat) floatingChat.scrollTop = floatingChat.scrollHeight;
+        }
+        
+    } catch (error) {
+        addLog('error', `Erreur chargement historique: ${error.message}`);
+        appendChat('system', `⚠️ Impossible de charger l'historique: ${error.message}`);
+    }
+}
+
+function appendChat(type, text, scroll = true) {
     // 1. Main Chat Window
     const chatWindow = document.getElementById('chat-window');
     const messageDiv = document.createElement('div');
@@ -951,7 +1040,7 @@ function appendChat(type, text) {
     chatWindow.appendChild(messageDiv);
 
     // Auto-scroll Main
-    if (autoScroll) {
+    if (scroll && autoScroll) {
         chatWindow.scrollTop = chatWindow.scrollHeight;
     }
 
@@ -960,7 +1049,7 @@ function appendChat(type, text) {
     if (floatingChat) {
         const floatMsg = messageDiv.cloneNode(true);
         floatingChat.appendChild(floatMsg);
-        floatingChat.scrollTop = floatingChat.scrollHeight;
+        if (scroll) floatingChat.scrollTop = floatingChat.scrollHeight;
     }
 }
 
@@ -1080,6 +1169,151 @@ async function askRAG() {
         updateBackendStatus('disconnected');
     } finally {
         answerDiv.classList.remove('loading');
+    }
+}
+
+// ============ AGENTS & ROUTING ============
+
+async function initAgents() {
+    // Initialiser le toggle auto-routing
+    const toggle = document.getElementById('auto-routing-toggle');
+    if (toggle) {
+        toggle.checked = isAutoRoutingEnabled;
+        toggle.addEventListener('change', (e) => {
+            isAutoRoutingEnabled = e.target.checked;
+            sessionStorage.setItem('isAutoRoutingEnabled', isAutoRoutingEnabled);
+            addLog('info', `Auto-routing ${isAutoRoutingEnabled ? 'activé' : 'désactivé'}`);
+            
+            // Si activé, désélectionner l'agent manuel (visuellement)
+            if (isAutoRoutingEnabled) {
+                document.querySelectorAll('.agent-item').forEach(el => el.classList.remove('selected'));
+                selectedAgentId = null;
+                sessionStorage.removeItem('selectedAgentId');
+                
+                // Retour session principale
+                sessionId = mainSessionId;
+                document.getElementById('session-id').textContent = sessionId;
+                loadSessionHistory(sessionId);
+            }
+        });
+    }
+
+    // Charger la liste des agents
+    await loadAgents();
+}
+
+async function loadAgents() {
+    const container = document.getElementById('agents-list');
+    if (!container) return;
+
+    try {
+        const response = await fetch(`${API_BASE_URL}/orchestrate/agents`, {
+            method: 'GET',
+            headers: { 'Content-Type': 'application/json' }
+        });
+
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const agents = await response.json();
+
+        renderAgentList(agents);
+
+    } catch (error) {
+        container.innerHTML = `<div class="error">Erreur chargement agents: ${error.message}</div>`;
+        addLog('error', `Erreur chargement agents: ${error.message}`);
+    }
+}
+
+function renderAgentList(agents) {
+    const container = document.getElementById('agents-list');
+    container.innerHTML = '';
+
+    if (agents.length === 0) {
+        container.innerHTML = '<div class="empty-state">Aucun agent disponible</div>';
+        return;
+    }
+
+    agents.forEach(agent => {
+        const item = document.createElement('div');
+        item.className = `agent-item ${selectedAgentId === agent.id ? 'selected' : ''}`;
+        item.onclick = () => selectAgent(agent.id, item);
+
+        const icon = getAgentIcon(agent.id);
+
+        item.innerHTML = `
+            <div class="agent-icon">${icon}</div>
+            <div class="agent-info">
+                <span class="agent-name">${agent.name}</span>
+                <span class="agent-desc">${agent.description}</span>
+            </div>
+        `;
+
+        container.appendChild(item);
+    });
+}
+
+function selectAgent(agentId, element) {
+    // Si on clique sur l'agent déjà sélectionné, on le désélectionne (retour auto)
+    if (selectedAgentId === agentId) {
+        selectedAgentId = null;
+        sessionStorage.removeItem('selectedAgentId');
+        element.classList.remove('selected');
+        
+        // Retour à la session principale
+        sessionId = mainSessionId;
+        document.getElementById('session-id').textContent = sessionId;
+        addLog('info', 'Retour session principale');
+        loadSessionHistory(sessionId);
+        
+        // Réactiver auto-routing par défaut si aucun agent sélectionné
+        const toggle = document.getElementById('auto-routing-toggle');
+        if (toggle && !toggle.checked) {
+            toggle.checked = true;
+            isAutoRoutingEnabled = true;
+            sessionStorage.setItem('isAutoRoutingEnabled', 'true');
+            addLog('info', 'Retour au mode Auto-routing');
+        }
+        return;
+    }
+
+    // Sélectionner le nouvel agent
+    selectedAgentId = agentId;
+    sessionStorage.setItem('selectedAgentId', agentId);
+    
+    // Gérer la session de l'agent
+    if (!agentSessions[agentId]) {
+        agentSessions[agentId] = generateSessionId(); // Créer une nouvelle session unique pour cet agent
+        sessionStorage.setItem('agentSessions', JSON.stringify(agentSessions));
+    }
+    
+    // Basculer sur la session de l'agent
+    sessionId = agentSessions[agentId];
+    document.getElementById('session-id').textContent = sessionId;
+    addLog('info', `Basculement sur session agent: ${agentId}`);
+    loadSessionHistory(sessionId);
+    
+    // Update UI
+    document.querySelectorAll('.agent-item').forEach(el => el.classList.remove('selected'));
+    element.classList.add('selected');
+    
+    // Désactiver auto-routing car choix manuel
+    const toggle = document.getElementById('auto-routing-toggle');
+    if (toggle) {
+        toggle.checked = false;
+        isAutoRoutingEnabled = false;
+        sessionStorage.setItem('isAutoRoutingEnabled', 'false');
+    }
+    
+    addLog('info', `Agent sélectionné: ${agentId}`);
+}
+
+function getAgentIcon(role) {
+    switch(role) {
+        case 'orchestrator': return '🧠';
+        case 'code': return '💻';
+        case 'vision': return '👁️';
+        case 'local': return '🔒';
+        case 'analyse': return '🔍';
+        default: return '🤖';
     }
 }
 
@@ -1366,8 +1600,8 @@ function startRealTimeTracking() {
     if (activityTracker) clearInterval(activityTracker);
     
     activityTracker = setInterval(() => {
-        updateAgentState();
-        renderTimeline();
+        // Update duration timer only
+        updateMonitorDuration();
     }, 1000); // Mise à jour chaque seconde
 
     // Démarrer la détection d'inactivité
@@ -1388,8 +1622,8 @@ function updateAgentState(tool = null, location = null, action = null, status = 
         agentState = status || 'active';
         lastActivityTime = now;
         
-        // Ajouter à l'historique
-        addToActivityLog(tool, currentAction, currentLocation, now);
+        // Update the card immediately on state change
+        updateAgentMonitor();
     }
     
     // Détecter l'inactivité (pas d'activité depuis 30 secondes)
@@ -1399,126 +1633,123 @@ function updateAgentState(tool = null, location = null, action = null, status = 
         currentTool = 'Aucun';
         currentAction = 'En attente';
         currentLocation = 'aucun';
+        updateAgentMonitor();
     }
     
     // Détecter un bug prolongé (plus de 2 minutes sans activité utile)
-    if (idleTime > 120000) {
+    if (idleTime > 120000 && agentState !== 'error') {
         agentState = 'error';
         currentAction = 'Possiblement bloqué';
+        updateAgentMonitor();
     }
 }
 
-function addToActivityLog(tool, action, location, timestamp) {
-    // Éviter les doublons consécutifs
-    const lastEntry = activityLog[activityLog.length - 1];
-    if (lastEntry && lastEntry.tool === tool && lastEntry.action === action && lastEntry.location === location) {
-        return;
-    }
-    
-    // Calculer la durée de l'activité précédente
-    if (lastEntry) {
-        lastEntry.duration = timestamp - lastEntry.startTime;
-    }
-    
-    // Ajouter la nouvelle entrée
-    activityLog.push({
-        tool,
-        action,
-        location,
-        startTime: timestamp,
-        duration: 0 // Sera calculé à la prochaine entrée
-    });
-    
-    // Limiter l'historique à 20 entrées
-    if (activityLog.length > 20) {
-        activityLog.shift();
-    }
-}
+function updateAgentMonitor() {
+    const card = document.getElementById('active-agent-card');
+    if (!card) return;
 
-function startIdleDetection() {
-    if (idleTimer) clearTimeout(idleTimer);
+    // 1. Update Identity (Name & Role)
+    const agentNameEl = document.getElementById('monitor-agent-name');
+    const agentRoleEl = document.getElementById('monitor-agent-role');
+    const agentAvatarEl = document.querySelector('.agent-avatar-large');
     
-    idleTimer = setTimeout(() => {
-        if (agentState === 'active' && Date.now() - lastActivityTime > 45000) {
-            updateAgentState('Système', 'temps réel', 'Surveillance inactive', 'idle');
-            renderTimeline();
+    // Determine current agent identity
+    let agentName = 'Orchestrator';
+    let agentRole = 'System Controller';
+    let agentIcon = '🧠';
+
+    if (selectedAgentId) {
+        // If manual selection
+        switch(selectedAgentId) {
+            case 'code': agentName = 'Code Agent'; agentRole = 'Software Engineer'; agentIcon = '💻'; break;
+            case 'vision': agentName = 'Vision Agent'; agentRole = 'Image Analyst'; agentIcon = '👁️'; break;
+            case 'local': agentName = 'Local Agent'; agentRole = 'System Integrator'; agentIcon = '🔒'; break;
+            case 'analyse': agentName = 'Analyst Agent'; agentRole = 'Data Analyst'; agentIcon = '🔍'; break;
+            default: agentName = selectedAgentId; agentRole = 'Specialized Agent'; agentIcon = '🤖';
         }
-    }, 50000); // Vérification toutes les 50 secondes
+    } else if (currentTool === 'Agent') {
+        // If auto-routing and tool is Agent, try to guess or keep generic
+        agentName = 'Active Agent';
+        agentRole = 'Processing...';
+        agentIcon = '🤖';
+    }
+
+    if (agentNameEl) agentNameEl.textContent = agentName;
+    if (agentRoleEl) agentRoleEl.textContent = agentRole;
+    if (agentAvatarEl) agentAvatarEl.textContent = agentIcon;
+
+    // 2. Update Status Badge & Card Style
+    const statusBadge = document.getElementById('monitor-status-badge');
+    const statusText = document.getElementById('monitor-status-text');
+    
+    // Reset classes
+    card.classList.remove('status-active', 'status-processing', 'status-error', 'status-idle');
+    
+    let statusLabel = 'UNKNOWN';
+    let statusClass = '';
+
+    switch(agentState) {
+        case 'active':
+            statusLabel = 'ACTIVE';
+            statusClass = 'status-active';
+            break;
+        case 'processing':
+            statusLabel = 'WORKING';
+            statusClass = 'status-processing';
+            break;
+        case 'error':
+            statusLabel = 'ERROR';
+            statusClass = 'status-error';
+            break;
+        case 'idle':
+            statusLabel = 'WAITING';
+            statusClass = 'status-idle';
+            break;
+        default:
+            statusLabel = 'READY';
+            statusClass = 'status-idle';
+    }
+
+    card.classList.add(statusClass);
+    if (statusText) statusText.textContent = statusLabel;
+
+    // 3. Update Action & Location
+    const actionTextEl = document.getElementById('monitor-action-text');
+    const locationTextEl = document.getElementById('monitor-location-text');
+
+    if (actionTextEl) actionTextEl.textContent = currentAction;
+    if (locationTextEl) {
+        // Format location nicely
+        let locDisplay = currentLocation;
+        if (locDisplay.startsWith('http')) {
+            try {
+                const url = new URL(locDisplay);
+                locDisplay = url.hostname + (url.pathname.length > 1 ? '/...' : '');
+            } catch(e) {}
+        }
+        locationTextEl.textContent = locDisplay || 'System';
+    }
 }
 
-function renderTimeline() {
-    const track = document.getElementById('timeline-track');
-    if (!track) return;
+function updateMonitorDuration() {
+    const durationEl = document.getElementById('monitor-duration');
+    if (!durationEl) return;
 
-    track.innerHTML = ''; // Vider complètement
-    
     const now = Date.now();
-    const recentActivities = getRecentActivities(now);
+    const duration = now - lastActivityTime;
     
-    // Créer la timeline continue
-    recentActivities.forEach((activity, index) => {
-        const node = createTimelineNode(activity, index === recentActivities.length - 1, now);
-        track.appendChild(node);
-    });
+    // Format MM:SS
+    const seconds = Math.floor(duration / 1000);
+    const minutes = Math.floor(seconds / 60);
+    const displaySec = (seconds % 60).toString().padStart(2, '0');
+    const displayMin = minutes.toString().padStart(2, '0');
     
-    // Auto-scroll pour montrer les derniers éléments
-    track.scrollLeft = track.scrollWidth;
+    durationEl.textContent = `${displayMin}:${displaySec}`;
 }
 
-function getRecentActivities(now) {
-    const activities = [];
-    const lookbackTime = 60000; // 1 minute de lookback
-    
-    // Ajouter l'activité actuelle
-    const currentActivity = {
-        tool: currentTool,
-        action: currentAction,
-        location: currentLocation,
-        startTime: Math.max(lastActivityTime, now - 5000), // Au moins 5 secondes
-        duration: 0,
-        isActive: true
-    };
-    activities.push(currentActivity);
-    
-    // Ajouter les activités récentes de l'historique
-    const recentHistory = activityLog.filter(activity => 
-        now - activity.startTime < lookbackTime && activity.duration > 2000 // Au moins 2 secondes
-    );
-    
-    // Fusionner et trier par temps
-    activities.push(...recentHistory);
-    activities.sort((a, b) => b.startTime - a.startTime);
-    
-    // Limiter à 10 activités max
-    return activities.slice(0, 10);
-}
-
-function createTimelineNode(activity, isActive, now) {
-    const node = document.createElement('div');
-    const isIdle = activity.tool === 'Aucun';
-    const hasError = agentState === 'error' && isActive;
-    const duration = activity.duration || (now - activity.startTime);
-    
-    node.className = `timeline-node ${isActive ? 'active' : ''} ${hasError ? 'error' : ''}`;
-    
-    // Icône selon l'outil
-    const icon = getToolIcon(activity.tool);
-    const timeDisplay = formatDuration(duration);
-    
-    node.innerHTML = `
-        <div class="timeline-node-header">
-            <div class="timeline-node-icon ${isIdle ? 'idle' : ''}">${icon}</div>
-            <div class="timeline-node-tool">${activity.tool}</div>
-        </div>
-        <div class="timeline-node-action">${activity.action}</div>
-        <div class="timeline-node-location">${activity.location}</div>
-        <div class="timeline-node-footer">
-            <div class="timeline-node-duration">${timeDisplay}</div>
-            <div class="timeline-node-time">${new Date(activity.startTime).toLocaleTimeString('fr-FR', { hour12: false })}</div>
-        </div>
-    `;
-    
-    return node;
+// Deprecated but kept empty to avoid errors if called elsewhere
+function renderTimeline() {
+    // No-op, replaced by updateAgentMonitor
 }
 
 function getToolIcon(tool) {
@@ -2066,6 +2297,7 @@ function startTodo(todoId) {
 }
 
 // Export des fonctions pour utilisation globale
+
 window.validateTodoSequence = validateTodoSequence;
 window.addTodo = addTodo;
 window.updateTodoStatus = updateTodoStatus;

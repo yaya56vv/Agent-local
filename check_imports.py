@@ -40,3 +40,4 @@ if __name__ == "__main__":
     # Add project root to sys.path
     sys.path.append(os.getcwd())
     check_imports("backend")
+
